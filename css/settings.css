@@ -4,6 +4,12 @@
     background-color: #f2f2f2;
 }
 
+/* Keep the personalization page canvas gray while it is tapped/opened on iOS. */
+#customize-screen,
+#customize-screen > .content {
+    background-color: #f2f2f2 !important;
+}
+
 #chat-settings-screen .content, #group-settings-screen .content, #customize-screen .content {
     padding: 0;
     overflow-y: auto;
@@ -773,6 +779,15 @@ input:checked + .kkt-slider:before {
     min-width: 0;
 }
 
+/* 全局 CSS 搜索框：比通用搜索栏更精致，降低输入框高度，不改变位置。 */
+#global-css-toolbar .toolbar-search-input,
+#global-css-toolbar .toolbar-replace-input {
+    height: 26px;
+    padding: 3px 8px;
+    box-sizing: border-box;
+    line-height: 18px;
+}
+
 .toolbar-match-count {
     font-size: 11px;
     color: #999;
@@ -813,4 +828,74 @@ input:checked + .kkt-slider:before {
     border-top: 1px solid #f5f5f5;
     padding-top: 8px;
     animation: fadeIn 0.2s ease-out;
+}
+
+
+/* 表情包匹配位置滑杆：与头像圆角滑杆保持同样的轻量 UI */
+.settings-range-slider {
+    width: 100%;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+.settings-range-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+}
+.settings-range-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 50%;
+}
+.settings-range-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+}
+.settings-range-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+}
+
+/* CSS 编辑器搜索高亮：只显示当前匹配项，使用单独的浅蓝色背景框 */
+.textarea-highlight-wrap {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.textarea-highlight-wrap > textarea {
+    position: relative;
+    z-index: 2;
+    background: transparent !important;
+}
+
+.textarea-highlight-wrap.is-searching > textarea::selection,
+.textarea-highlight-wrap.is-searching > textarea::-moz-selection {
+    background: transparent !important;
+    color: inherit !important;
+}
+
+.textarea-current-match-highlight {
+    position: absolute;
+    z-index: 1;
+    display: none;
+    pointer-events: none;
+    background: #cee4f1;
+    border-radius: 3px;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}
+
+.textarea-search-measure {
+    position: absolute;
+    left: -100000px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }

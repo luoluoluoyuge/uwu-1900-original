@@ -483,7 +483,21 @@
     max-width: 75%;
 }
 
-.group-msg-content .message-bubble {
+.group-msg-content /* 聊天气泡长按时只触发网页自己的操作菜单，禁止系统文字选择/复制/搜索菜单 */
+#message-area .message-wrapper {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-drag: none !important;
+}
+
+#message-area .message-wrapper * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+}
+
+.message-bubble {
     max-width: 100%;
 }
 
@@ -1430,6 +1444,81 @@
 /* 聊天输入框区域 */
 .chat-input-wrapper {
     flex-shrink: 0;
+    position: relative;
+}
+
+/* 输入框上方的表情包智能匹配弹窗 */
+#sticker-match-popup {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 100%;
+    height: 96px;
+    display: none;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.97);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 12px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+    backdrop-filter: blur(10px);
+    overflow-x: auto;
+    overflow-y: hidden;
+    z-index: 30;
+}
+
+#sticker-match-popup.visible {
+    display: block;
+}
+
+#sticker-match-list {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+#sticker-match-list::-webkit-scrollbar { display: none; }
+
+.sticker-match-item {
+    flex: 0 0 auto;
+    width: 74px;
+    height: calc(100% - 4px);
+    min-height: 52px;
+    padding: 4px;
+    border: none;
+    border-radius: 9px;
+    background: rgba(0,0,0,0.035);
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    box-sizing: border-box;
+}
+
+.sticker-match-item:active {
+    transform: scale(0.96);
+}
+
+.sticker-match-item img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    border-radius: 6px;
+}
+
+.sticker-match-item span {
+    max-width: 100%;
+    font-size: 10px;
+    line-height: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .message-input-area {
@@ -1630,6 +1719,8 @@
 /* 功能面板分页滑动样式 */
 .function-swiper-container {
     height: 100%;
+    width: 100%;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     position: relative;
@@ -2374,3 +2465,164 @@
     60% { content: '..'; }
     80%, 100% { content: '...'; }
 }
+
+
+/* 拍一拍：头像抖一下 */
+@keyframes patShake {
+    0%, 100% { transform: translateX(0) rotate(0); }
+    20% { transform: translateX(-3px) rotate(-6deg); }
+    40% { transform: translateX(3px) rotate(6deg); }
+    60% { transform: translateX(-2px) rotate(-3deg); }
+    80% { transform: translateX(2px) rotate(3deg); }
+}
+.message-avatar.pat-shake { animation: patShake 0.5s ease; }
+
+
+/* 投票卡片（和购物小票一样窄） */
+.vote-card {
+    width: 180px;
+    margin: 0 8px;
+    background: #fff;
+    color: var(--text-color, #2a3032);
+    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+    padding: 10px;
+    box-sizing: border-box;
+    position: relative;
+}
+.vote-card-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.vote-card-icon { width: 20px; height: 20px; flex: 0 0 20px; fill: #555; margin-top: 1px; }
+.vote-card-headtext { min-width: 0; }
+.vote-card-title { font-weight: 700; font-size: calc(13px * var(--app-font-scale, 1)); line-height: 1.35; word-break: break-word; }
+.vote-card-sub { font-size: calc(10px * var(--app-font-scale, 1)); color: #999; margin-top: 2px; }
+.vote-options { display: flex; flex-direction: column; gap: 5px; }
+.vote-option {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 8px; border-radius: 8px;
+    background: #f5f6f7; cursor: pointer;
+    transition: background-color 0.2s;
+}
+.vote-option.selected { background: var(--primary-color, #cee4f1); }
+.vote-check {
+    width: 14px; height: 14px; flex: 0 0 14px;
+    border-radius: 50%; border: 2px solid #bbb; box-sizing: border-box;
+    position: relative;
+}
+.vote-option.selected .vote-check { border-color: var(--text-color, #2a3032); }
+.vote-option.selected .vote-check::after {
+    content: ''; position: absolute; inset: 2px; border-radius: 50%;
+    background: var(--text-color, #2a3032);
+}
+.vote-option-text { flex: 1; min-width: 0; font-size: calc(12px * var(--app-font-scale, 1)); line-height: 1.35; word-break: break-word; }
+.vote-option-voters { display: flex; gap: 3px; flex: 0 0 auto; }
+.vote-voter-chip {
+    font-size: calc(9px * var(--app-font-scale, 1)); padding: 1px 5px; border-radius: 7px;
+    background: rgba(0, 0, 0, 0.08); color: #555; white-space: nowrap;
+}
+.vote-add-row { margin-top: 6px; display: flex; gap: 5px; }
+.vote-add-btn {
+    flex: 1; padding: 6px; border: 1px dashed #c8c8c8; border-radius: 8px;
+    background: transparent; color: #888; cursor: pointer;
+    font-family: var(--font-family); font-size: calc(11px * var(--app-font-scale, 1));
+}
+.vote-add-input {
+    flex: 1; min-width: 0; width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px;
+    font-family: var(--font-family); font-size: calc(12px * var(--app-font-scale, 1));
+}
+.vote-add-confirm {
+    padding: 6px 9px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;
+    background: var(--primary-color, #cee4f1); color: var(--text-color, #2a3032);
+    font-family: var(--font-family); font-size: calc(11px * var(--app-font-scale, 1));
+}
+.vote-card .message-time {
+    position: static; display: block; text-align: right; margin-top: 5px;
+    font-size: 9px; color: #aaa;
+}
+.vote-compose-option {
+    width: 100%; padding: 10px 12px; border: 2px solid #e2e2e4; border-radius: 10px;
+    box-sizing: border-box; font-family: var(--font-family);
+}
+
+/* 问卷 */
+.qn-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.qn-chip {
+    font-size: calc(10px * var(--app-font-scale, 1)); padding: 2px 7px; border-radius: 8px;
+    background: #f0f1f2; color: #888;
+}
+.qn-chip.done { background: var(--primary-color, #cee4f1); color: var(--text-color, #2a3032); }
+.qn-action-row { display: flex; }
+.qn-action {
+    flex: 1; padding: 7px; border: none; border-radius: 8px; cursor: pointer;
+    background: var(--primary-color, #cee4f1); color: var(--text-color, #2a3032);
+    font-family: var(--font-family); font-size: calc(12px * var(--app-font-scale, 1)); font-weight: 600;
+}
+.qn-action.qn-waiting { background: #f0f1f2; color: #999; cursor: default; font-weight: 400; }
+.qn-card .vote-card-head { margin-bottom: 6px; }
+.qn-draft-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 10px; border-radius: 10px; background: #f5f6f7; margin-bottom: 8px;
+}
+.qn-draft-info { min-width: 0; flex: 1; }
+.qn-draft-title { font-weight: 600; font-size: 14px; word-break: break-word; }
+.qn-draft-sub { font-size: 11px; color: #999; margin-top: 2px; }
+.qn-draft-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.qn-draft-actions button {
+    border: none; border-radius: 8px; padding: 5px 8px; font-size: 12px; cursor: pointer;
+    background: #fff; color: #555; font-family: var(--font-family);
+}
+.qn-draft-actions button[data-qn-draft-act="send"] { background: var(--primary-color, #cee4f1); color: var(--text-color, #2a3032); }
+.qn-editor-row { display: flex; gap: 6px; align-items: center; }
+.qn-editor-q {
+    flex: 1; min-width: 0; padding: 10px 12px; border: 2px solid #e2e2e4; border-radius: 10px;
+    box-sizing: border-box; font-family: var(--font-family);
+}
+.qn-editor-del {
+    flex: 0 0 32px; height: 32px; border: none; border-radius: 50%; background: #f0f1f2;
+    color: #888; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.qn-answer-input {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border: 2px solid #e2e2e4; border-radius: 10px;
+    font-family: var(--font-family); resize: vertical;
+}
+.qn-result-item { padding: 10px 0; border-bottom: 1px solid #eee; }
+.qn-result-item:last-child { border-bottom: none; }
+.qn-result-q { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.qn-result-a { font-size: 13px; line-height: 1.5; margin-bottom: 4px; word-break: break-word; }
+.qn-who {
+    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 7px; margin-right: 6px;
+    background: var(--primary-color, #cee4f1); color: var(--text-color, #2a3032);
+}
+.qn-section-title { font-size: 12px; color: #999; margin: 16px 0 8px; }
+.qn-done-item {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 10px; border-radius: 10px; background: #f5f6f7; margin-bottom: 8px;
+}
+.qn-done-arrow { color: #bbb; font-size: 18px; }
+.qn-done-item { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.qn-done-del {
+    display: none; border: none; border-radius: 8px; padding: 5px 8px; font-size: 12px; line-height: 1.2;
+    background: #fff; color: #e5736f; cursor: pointer; font-family: var(--font-family); flex: 0 0 auto;
+}
+.qn-done-item.show-del .qn-done-del { display: inline-block; }
+.qn-done-item.show-del .qn-done-arrow { display: none; }
+.qn-mode-row { display: flex; gap: 8px; }
+.qn-mode-opt {
+    flex: 1; display: flex !important; flex-direction: row; align-items: center; gap: 8px; cursor: pointer;
+    padding: 9px 10px; border: 2px solid #e2e2e4; border-radius: 10px; margin: 0 !important; font-weight: 400;
+}
+.qn-mode-opt:has(input:checked) { border-color: var(--primary-color, #cee4f1); background: rgba(0, 0, 0, 0.02); }
+.qn-mode-opt input { margin: 0; width: auto !important; padding: 0 !important; border: none !important; flex: 0 0 auto; }
+.qn-mode-opt span { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.qn-mode-opt b { font-size: 13px; color: var(--text-color, #2a3032); }
+.qn-mode-opt small { font-size: 10px; color: #999; font-weight: 400; margin-top: 2px; }
+
+/* 问卷双语：外语原文 + 小号灰色中文翻译 */
+.qn-bi { display: block; }
+.qn-bi-orig { display: block; }
+.qn-bi-tr { display: block; font-size: 0.8em; font-weight: normal; color: #999; margin-top: 2px; line-height: 1.4; }
+.qn-bi-collapsed .qn-bi-tr { display: none; }
+.vote-card .qn-bi { cursor: pointer; }
+
+/* 弹窗里的双语：标签/序号和原文在同一行，换行后文字仍从最左边开始；中文翻译另起一行，同样靠左 */
+.qn-result-a .qn-bi, .qn-q-label .qn-bi, .qn-result-a .qn-bi-orig, .qn-q-label .qn-bi-orig { display: inline; }

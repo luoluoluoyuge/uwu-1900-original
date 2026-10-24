@@ -150,6 +150,7 @@ body {
     padding: 15px;
     border-radius: 10px;
     border: none;
+    font-family: var(--font-family);
     font-size: calc(16px * var(--app-font-scale));
     font-weight: bold;
     cursor: pointer;
@@ -435,4 +436,12 @@ label.btn-primary {
     left: 0;
     top: 2px;
     color: var(--accent-color);
+}
+
+
+/* 输入框、文本域、下拉框里的文字也跟随全局字体（带 class 的特殊样式，如代码框的等宽字体，优先级更高，不受影响） */
+input,
+textarea,
+select {
+    font-family: var(--font-family);
 }
