@@ -217,7 +217,8 @@
 }
 
 /* 日记生成模态框 */
-#generate-journal-modal .modal-window {
+#generate-journal-modal .modal-window,
+#journal-auto-modal .modal-window {
     width: 85%;
     max-width: 340px;
 }
@@ -277,3 +278,22 @@
     width: 22px;
     height: 22px;
 }
+
+/* 日记多选栏：两行布局（操作 + 导出/导入） */
+#journal-multi-select-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    border-radius: 22px;
+}
+#journal-multi-select-bar .journal-bar-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+#journal-multi-select-bar .journal-bar-io { justify-content: stretch; }
+#journal-multi-select-bar .journal-bar-io .btn { flex: 1; white-space: nowrap; }
+#journal-multi-select-bar .btn { white-space: nowrap; }
+#journal-multi-select-bar .btn { margin: 0; }
+#journal-multi-select-bar .journal-bar-row > div { align-items: center; }

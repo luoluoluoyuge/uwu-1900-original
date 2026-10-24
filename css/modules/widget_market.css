@@ -206,3 +206,17 @@
     font-size: 11px;
     color: #999;
 }
+
+/* 修复：添加小组件面板里卡片被压扁（预览区高度塌成一条线、名称被裁掉） */
+.widget-add-grid .widget-market-card {
+    flex-shrink: 0;
+    min-height: max-content;
+}
+
+.widget-add-grid .widget-preview-canvas {
+    flex-shrink: 0;
+}
+
+.widget-add-grid {
+    grid-auto-rows: max-content;
+}
