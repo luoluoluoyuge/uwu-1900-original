@@ -164,12 +164,76 @@ const globalSettingKeys = [
     'cotSettings', 'cotPresets', 'hasSeenVideoCallDisclaimer', 'hasSeenVideoCallAvatarHint',
     'workshopSettings', 'workshopLlmPresets', 'workshopPromptPresets', 'homeLayoutOrder',
     'homeLayoutPages', 'widgetTemplates', 'addedWidgets', 'backupReminderSettings',
-    'stUnlocked'
+    'stUnlocked', 'homeScreenPresets'
 ];
 
 
-const appVersion = "1.8.9";
+const appVersion = "2.1.3.UmU";
 const updateLog = [
+    {
+        version: "2.1.3.UmU",
+        date: "2026-10-22",
+        notes: [
+            "新增",
+            "查手机动态新增user动态",
+            "^可以自己发让char回复，也可以筛选只显示char的动态",
+            "投票",
+            "问卷",
+            "^有单向跟双向两种类型，单向是对方填完就可以查看答案；双向是两方都填完才可以互相看答案。问卷填完都会自动保存随时回看",
+            "拍一拍",
+            "双语聊天气泡外自动翻译",
+            "输入框内文字字体跟随全局",
+            "自动总结日记",
+            "修复",
+            "教程中备份数据字体异常",
+            "CF后台消息系统通知部分缺失",
+            "暂停调用无法停止消息输入",
+            "无法建立分支存档",
+            "安卓通知错误",
+            "因user未取名无法识别格式导致发送出文字表情包",
+            "!若有使用Cloudflare后台，此次更新请务必记得fork GitHub仓库并更新CF worker",
+        ]
+    },
+    {
+        version: "2.1.1.UmU",
+        date: "2026-10-17",
+        notes: [
+            "1900UwU二改版——UmU",
+            "基于1900UwU1.8.8版本二改，修复了一些问题以及增加一点自己觉得实用的小功能",
+            "非常感谢源代码的三位老师",
+            "^源代码来源：**EE、1900、莫由**（论坛功能by莫由）",
+            "前排特别感谢",
+            "感谢糯米机 **糯糯 TO** 两位老师对「Cloudflare 后台消息」的想法授权",
+            "感谢**yuan**老师对「快速设置api」的想法授权",
+            "功能介绍",
+            "新增",
+            "Cloudflare 后台消息",
+            "^解决ios用户开音频保活导致音频通道被占用的问题，用CF后台可以边听音乐边等回复，不需要音频保活，就算UwU完全关闭也可以收到主动/被动消息。",
+            "系统级通知弹窗",
+            "三击触发api快速设置",
+            "表情包匹配与弹窗高度自定",
+            "美化搜寻与最爱置顶",
+            "暂停调用api",
+            "表情包导入/编辑分组名称/导出表情包txt",
+            "全局css导入/搜索代码/重置",
+            "世界书导入/排序文件夹优先",
+            "主动消息新增安静时段",
+            "壁纸url应用",
+            "主屏幕预设保存/导入/导出（导出可选择是否一起导出小组件，仅限小组件作者本身分享使用，若非作者请勿随意二传他人作品）",
+            "副api后台消息",
+            "日记导出txt/导出导入json",
+            "api模型搜索",
+            "修复",
+            "数据管理分析中角色储存相关错误/聊天记录重复计算",
+            "世界书无法移动到文件夹",
+            "美化代码搜索无高亮/定位",
+            "长按气泡选中文字触发手机系统工具列",
+            "部分svg手机端消失",
+            "T.T提示词char无法主动发起通话",
+            "添加小组件弹窗预览卡片压缩",
+            "自定义内残留的音乐图标",
+        ]
+    },
     {
         version: "1.8.9",
         date: "2026-07-28",
@@ -356,7 +420,13 @@ notes: [
 var db = {
     characters: [],
     groups: [],
-    apiSettings: {},
+    apiSettings: {
+        backendMode: 'audio',
+        backendUrl: '',
+        backendToken: '',
+        backendPushEnabled: false,
+        backendUserId: ''
+    },
     wallpaper: 'https://i.postimg.cc/W4Z9R9x4/ins-1.jpg',
     myStickers: [],
     homeScreenMode: 'night',
@@ -604,7 +674,25 @@ function initDatabase() {
 }
 
 // 数据保存与加载
-const saveData = async () => {
+// 保存排队执行：同一时刻只跑一次写入事务，避免同步消息、注册通知等地方同时保存时互相冲突
+// （iOS 上并发写入偶尔会报 "Failed to delete record from object store"）。失败时等一下重试一次。
+let saveDataQueue = Promise.resolve();
+const saveData = () => {
+    const run = async () => {
+        try {
+            await saveDataOnce();
+        } catch (error) {
+            console.warn('[saveData] 保存失败，稍后重试一次：', error);
+            await new Promise(resolve => setTimeout(resolve, 400));
+            await saveDataOnce();
+        }
+    };
+    const next = saveDataQueue.then(run, run);
+    saveDataQueue = next.catch(() => {});
+    return next;
+};
+
+const saveDataOnce = async () => {
     if (!dexieDB) return;
     if (typeof syncAllActiveArchives === 'function') {
         syncAllActiveArchives();
@@ -653,7 +741,13 @@ const loadData = async () => {
 
     globalSettingKeys.forEach(key => {
         const defaultValue = {
-            apiSettings: {},
+            apiSettings: {
+        backendMode: 'audio',
+        backendUrl: '',
+        backendToken: '',
+        backendPushEnabled: false,
+        backendUserId: ''
+    },
             wallpaper: 'https://i.postimg.cc/W4Z9R9x4/ins-1.jpg',
             homeScreenMode: 'night',
             fontUrl: '',
@@ -687,6 +781,7 @@ const loadData = async () => {
             workshopPromptPresets: [],
             homeLayoutOrder: ['widget-top', 'widget-ins', 'app-chat', 'app-api', 'app-wallpaper', 'app-worldbook', 'app-customize', 'app-tutorial', 'app-reader', 'widget-heart', 'app-placeholder'],
             homeLayoutPages: null,
+            homeScreenPresets: [],
             backupReminderSettings: { enabled: true, interval: 3, lastReminderTime: 0 },
             stUnlocked: false
         };

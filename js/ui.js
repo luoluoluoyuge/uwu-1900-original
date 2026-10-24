@@ -1277,14 +1277,147 @@ function applyGlobalFont(fontValue, isCustom = false) {
 function applyGlobalCss(css) {
     const styleId = 'global-css-style';
     let styleElement = document.getElementById(styleId);
-    
+
     if (!styleElement) {
         styleElement = document.createElement('style');
         styleElement.id = styleId;
         document.head.appendChild(styleElement);
     }
-    
+
     styleElement.innerHTML = css || '';
+
+    // iOS Safari / Home Screen Web App：部分内联 SVG 在全局美化 CSS 叠加后可能被
+    // display/visibility/opacity 或 SVG 的绘制属性误伤，表现为电脑可见、手机不可见。
+    // 将关键设置页与日记顶栏图标的可见性保护样式放在全局 CSS 之后，避免用户美化 CSS
+    // 意外把这些功能图标隐藏；同时分别保留 stroke / fill 两类 SVG 的原始绘制方式。
+    const svgCompatId = 'ios-svg-compat-style';
+    let svgCompatStyle = document.getElementById(svgCompatId);
+    if (!svgCompatStyle) {
+        svgCompatStyle = document.createElement('style');
+        svgCompatStyle.id = svgCompatId;
+    }
+    svgCompatStyle.textContent = `
+        /* 设置页内联 SVG：只恢复原本的尺寸/绘制属性，不改变图标本身。 */
+        #api-settings-screen .kkt-item-icon svg {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            overflow: visible !important;
+            flex-shrink: 0 !important;
+            width: 24px !important;
+            height: 24px !important;
+            min-width: 24px !important;
+            min-height: 24px !important;
+            max-width: 24px !important;
+            max-height: 24px !important;
+            box-sizing: border-box !important;
+        }
+
+        #api-settings-screen .feature-card-icon svg {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            overflow: visible !important;
+            flex-shrink: 0 !important;
+            width: 20px !important;
+            height: 20px !important;
+            min-width: 20px !important;
+            min-height: 20px !important;
+            max-width: 20px !important;
+            max-height: 20px !important;
+            box-sizing: border-box !important;
+        }
+
+        #customize-screen .kkt-item-icon svg {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            overflow: visible !important;
+            flex-shrink: 0 !important;
+            width: 24px !important;
+            height: 24px !important;
+            min-width: 24px !important;
+            min-height: 24px !important;
+            max-width: 24px !important;
+            max-height: 24px !important;
+            box-sizing: border-box !important;
+        }
+
+        #memory-journal-screen .app-header .action-btn-group .action-btn svg,
+        #memory-journal-detail-screen .app-header .action-btn svg {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            overflow: visible !important;
+            flex-shrink: 0 !important;
+            width: 22px !important;
+            height: 22px !important;
+            min-width: 22px !important;
+            min-height: 22px !important;
+            max-width: 22px !important;
+            max-height: 22px !important;
+            box-sizing: border-box !important;
+        }
+
+        /* 快速 API 设置图标的 viewBox 绘制范围本身更满，稍微缩小到 20px，
+           视觉上与同一列表里的其他功能图标保持一致。 */
+        #api-settings-screen .kkt-item-icon svg.quick-api-settings-icon {
+            width: 20px !important;
+            height: 20px !important;
+            min-width: 20px !important;
+            min-height: 20px !important;
+            max-width: 20px !important;
+            max-height: 20px !important;
+        }
+
+        #api-settings-screen .kkt-item-icon svg[stroke],
+        #api-settings-screen .feature-card-icon svg[stroke],
+        #customize-screen .kkt-item-icon svg[stroke],
+        #memory-journal-screen .app-header .action-btn-group .action-btn svg[stroke],
+        #memory-journal-detail-screen .app-header .action-btn svg[stroke] {
+            stroke: currentColor !important;
+        }
+
+        #api-settings-screen .kkt-item-icon svg[fill="currentColor"],
+        #api-settings-screen .feature-card-icon svg[fill="currentColor"],
+        #customize-screen .kkt-item-icon svg[fill="currentColor"],
+        #memory-journal-screen .app-header .action-btn-group .action-btn svg[fill="currentColor"],
+        #memory-journal-detail-screen .app-header .action-btn svg[fill="currentColor"] {
+            fill: currentColor !important;
+        }
+
+        /* These two pages use a solid white top bar. The shared translucent
+           header lets the gray page underneath bleed through during screen
+           fades and font/theme updates. */
+        #storage-analysis-screen,
+        #storage-analysis-screen > .storage-content-scroll,
+        #storage-analysis-screen > .app-header,
+        #customize-screen > .app-header {
+            background-color: #ffffff !important;
+            background-image: none !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            transition: none !important;
+        }
+
+        /* Keep tutorial styling stable without changing its layout. */
+        #tutorial-screen,
+        #tutorial-screen > .app-header,
+        #tutorial-screen > .content {
+            background-color: #ffffff !important;
+        }
+        #tutorial-screen,
+        #tutorial-screen .app-header .title,
+        #tutorial-screen .tutorial-header,
+        #tutorial-screen .tutorial-content {
+            color: #333333 !important;
+        }
+        #tutorial-screen .tutorial-item {
+            background-color: #ffffff !important;
+        }
+    `;
+    // 确保兼容层永远位于用户全局 CSS 后面。
+    document.head.appendChild(svgCompatStyle);
 }
 
 function applyFontSize(scale) {
@@ -1449,8 +1582,9 @@ function setupFunctionPanelSwiper() {
     const originalGrid = panelArea.querySelector('.expansion-grid');
     if (!originalGrid) return; 
 
-    // 获取所有 expansion-item
-    const items = Array.from(originalGrid.querySelectorAll('.expansion-item'));
+    // 只把当前实际可见的按钮参与分页，避免隐藏按钮（例如私聊红包）单独形成第三页。
+    const items = Array.from(originalGrid.querySelectorAll('.expansion-item'))
+        .filter(item => getComputedStyle(item).display !== 'none');
     if (items.length === 0) return;
 
     // 创建新结构
@@ -1465,6 +1599,7 @@ function setupFunctionPanelSwiper() {
 
     const itemsPerPage = 8;
     const pageCount = Math.ceil(items.length / itemsPerPage);
+    let renderedPageCount = 0;
 
     for (let i = 0; i < pageCount; i++) {
         const slide = document.createElement('div');
@@ -1472,20 +1607,24 @@ function setupFunctionPanelSwiper() {
         
         const pageItems = items.slice(i * itemsPerPage, (i + 1) * itemsPerPage);
         pageItems.forEach(item => slide.appendChild(item));
-        
+
         wrapper.appendChild(slide);
 
         const dot = document.createElement('span');
-        dot.className = `dot ${i === 0 ? 'active' : ''}`;
+        dot.className = `dot ${renderedPageCount === 0 ? 'active' : ''}`;
         pagination.appendChild(dot);
+        renderedPageCount++;
     }
+
+    // 记录实际生成的页数，后续只在确实有多页时显示分页点。
+    const actualPageCount = renderedPageCount;
 
     // 移除旧 grid
     originalGrid.remove();
 
     swiperContainer.appendChild(wrapper);
     // 只有多页时才显示 pagination
-    if (pageCount > 1) {
+    if (actualPageCount > 1) {
         swiperContainer.appendChild(pagination);
     }
     

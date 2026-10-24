@@ -494,6 +494,11 @@ function openChatRoom(chatId, type) {
     const chat = (type === 'private') ? db.characters.find(c => c.id === chatId) : db.groups.find(g => g.id === chatId);
     if (!chat) return;
 
+    // 从系统通知等入口直接调用时，全局的当前聊天尚未设置（聊天列表点击会先设置）。
+    // renderMessages 等函数都依赖 currentChatId/currentChatType，缺少会导致聊天室空白。
+    currentChatId = chatId;
+    currentChatType = type;
+
     // 迁移旧的私聊数据 (仅群聊)
     if (type === 'group' && chat.privateSessions && typeof migratePrivateSessionsToHistory === 'function') {
         migratePrivateSessionsToHistory(chat);
@@ -643,7 +648,7 @@ async function sendMessage() {
     }
 
     let messageContent;
-    const systemRegex = /\[system:.*?\]|\[system-display:.*?\]/;
+    const systemRegex = /\[system:[\s\S]*?\]|\[system-display:[\s\S]*?\]/;
     const inviteRegex = /\[.*?邀请.*?加入群聊\]/;
     const renameRegex = /\[(.*?)修改群名为“(.*?)”\]/;
     const shopOrderRegex = /\[.*?为你下单的商品：.*?\]/;
