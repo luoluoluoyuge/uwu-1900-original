@@ -49,6 +49,9 @@ const chatRoomHtml = `
         </div>
 
         <div class="chat-input-wrapper">
+            <div id="sticker-match-popup" aria-hidden="true">
+                <div id="sticker-match-list"></div>
+            </div>
             <div id="reply-preview-bar">
                 <div class="reply-preview-content">
                     <span class="reply-preview-name"></span>
@@ -210,6 +213,7 @@ const chatRoomHtml = `
                             <span id="sticker-select-count" style="font-size: 14px; color: #666;">已选 0 项</span>
                         </div>
                         <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-neutral btn-small" id="export-sticker-txt-btn">导出TXT</button>
                             <button class="btn btn-neutral btn-small" id="move-sticker-group-btn">移动分组</button>
                             <button class="btn btn-danger btn-small" id="delete-selected-stickers-btn">删除</button>
                         </div>

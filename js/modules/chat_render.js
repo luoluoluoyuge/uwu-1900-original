@@ -1,5 +1,33 @@
 // --- 消息渲染模块 ---
 
+function pinMessageAreaToBottom(area, duration = 1500) {
+    if (!area) return;
+    if (area.__pinStop) area.__pinStop();
+    area.style.scrollBehavior = 'auto'; // 平滑滚动会让“先回顶部再慢慢滚下来”
+    let stopped = false;
+    const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+    const pin = () => { if (!stopped) area.scrollTop = area.scrollHeight; };
+    const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        area.style.scrollBehavior = '';
+        events.forEach(name => area.removeEventListener(name, stop, true));
+        area.removeEventListener('load', pin, true);
+        area.__pinStop = null;
+    };
+    area.__pinStop = stop;
+    events.forEach(name => area.addEventListener(name, stop, { capture: true, passive: true }));
+    area.addEventListener('load', pin, true); // 图片加载完变高时立刻再贴底
+    const endAt = performance.now() + duration;
+    const tick = (now) => {
+        if (stopped) return;
+        pin();
+        if (now < endAt) requestAnimationFrame(tick); else stop();
+    };
+    pin();
+    requestAnimationFrame(tick);
+}
+
 function renderMessages(isLoadMore = false, forceScrollToBottom = false) {
     const chat = (currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId);
     if (!chat || !chat.history) return;
@@ -40,13 +68,13 @@ function renderMessages(isLoadMore = false, forceScrollToBottom = false) {
         let isContinuous = false;
         
         let invisibleRegex;
-        const momentsRegex = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|更新了个性签名)[：:][\s\S]+?\]/;
+        const momentsRegex = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|点赞了.*?|更新了个性签名)[：:][\s\S]+?\]/;
         if (chat.showStatusUpdateMsg) {
             // 在末尾添加 |<thinking>[\s\S]*?<\/thinking>
             invisibleRegex = new RegExp([
                 /\[.*?(?:接收|退回).*?的转账\]/.source,
                 /\[.*?已接收礼物\]/.source,
-                /\[system:.*?\]/.source,
+                /\[system:[\s\S]*?\]/.source,
                 /\[.*?邀请.*?加入了群聊\]/.source,
                 /\[.*?修改群名为：.*?\]/.source,
                 /\[.*?同意了.*?的代付请求\]/.source,
@@ -61,10 +89,10 @@ function renderMessages(isLoadMore = false, forceScrollToBottom = false) {
                 /\[.*?(?:接收|退回).*?的转账\]/.source,
                 /\[.*?更新状态为：.*?\]/.source,
                 /\[.*?已接收礼物\]/.source,
-                /\[system:.*?\]/.source,
+                /\[system:[\s\S]*?\]/.source,
                 /\[.*?邀请.*?加入了群聊\]/.source,
                 /\[.*?修改群名为：.*?\]/.source,
-                /\[system-display:.*?\]/.source,
+                /\[system-display:[\s\S]*?\]/.source,
                 /\[.*?同意了.*?的代付请求\]/.source,
                 /\[.*?拒绝了.*?的代付请求\]/.source,
                 /<thinking>[\s\S]*?<\/thinking>/.source,
@@ -73,7 +101,7 @@ function renderMessages(isLoadMore = false, forceScrollToBottom = false) {
             ].join('|'));
         }
 
-        const isSystemMsg = /\[system:.*?\]|\[system-display:.*?\]/.test(msg.content);
+        const isSystemMsg = /\[system:[\s\S]*?\]|\[system-display:[\s\S]*?\]/.test(msg.content);
         
         if (!isSystemMsg) {
             let prevMsg = null;
@@ -115,9 +143,10 @@ function renderMessages(isLoadMore = false, forceScrollToBottom = false) {
         messageArea.prepend(loadMoreButton);
     }
     if (forceScrollToBottom) {
-        setTimeout(() => {
-            messageArea.scrollTop = messageArea.scrollHeight;
-        }, 0);
+        // 重绘后要稳稳停在底部：图片/头像/字体稍后才加载完、页面刚从后台切回来时尺寸还没算好，
+        // 都会让内容变高，只定位一次的话就会停在中间（看起来像“往上滑了不回来”）。
+        // 所以在短时间内持续贴底，用户一碰屏幕就立刻停止。
+        pinMessageAreaToBottom(messageArea);
     } else if (isLoadMore) {
         // 临时禁用平滑滚动以防止位置跳动
         messageArea.style.scrollBehavior = 'auto';
@@ -316,9 +345,10 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
 
         wrapper.appendChild(bubbleRow);
 
-        if (styleMode === 'under') {
+        if (styleMode === 'under' || styleMode === 'under-auto') {
             const translationDiv = document.createElement('div');
-            translationDiv.className = 'translation-text';
+            // 「气泡外 (自动显示)」：翻译默认就展开，点一下气泡可以收起 / 再展开。
+            translationDiv.className = styleMode === 'under-auto' ? 'translation-text active' : 'translation-text';
             translationDiv.textContent = chineseText;
             wrapper.appendChild(translationDiv);
         }
@@ -367,24 +397,29 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
     const updateStatusMatch = content.match(updateStatusRegex);
     const callInviteMatch = content.match(callInviteRegex);
     const callRejectMatch = content.match(callRejectRegex);
+    // 角色拍一拍：[名字拍了拍我：后缀]（后缀可无）。名字部分不能带冒号，避免误伤普通消息里的“拍了拍”。
+    const voteEventMatch = (!timeSkipMatch) ? content.match(/^\[([^\[\]]{1,40}?)在投票[“"「『]([^\[\]]*?)[”"」』]中(选择了|添加了选项)[：:]\s*([^\[\]]*?)\s*\]$/) : null;
+    const qnAnswerMatch = (!timeSkipMatch) ? content.match(/^\[([^\[\]：:]{1,40}?)(?:回答了?|填写了?|填寫了?|作答了?|完成了)[问問]卷\s*(?:[“"「『]([^\[\]]*?)[”"」』])?\s*[：:]/) : null;
+    const patMatch = (!timeSkipMatch) ? content.match(/^\[([^\[\]：:]{1,40}?)拍了拍([^\[\]：:]{1,40}?)(?:[：:]([^\[\]]{0,30}))?\]$/) : null;
 
     // 私聊消息正则
     const privateRegex = /^\[Private: (.*?) -> (.*?): ([\s\S]+?)\]$/;
     const privateEndRegex = /^\[Private-End: (.*?) -> (.*?)\]$/;
 
     let invisibleRegex;
-    const momentsRegex = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|更新了个性签名)[：:][\s\S]+?\]/;
+    const momentsRegex = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|点赞了.*?|更新了个性签名)[：:][\s\S]+?\]/;
     if (chat.showStatusUpdateMsg) {
         // 在末尾添加 |<thinking>[\s\S]*?<\/thinking>
         invisibleRegex = new RegExp([
             /\[.*?(?:接收|退回).*?的转账\]/.source,
             /\[.*?已接收礼物\]/.source,
-            /\[system:.*?\]/.source,
+            /\[system:[\s\S]*?\]/.source,
             /\[系统情景通知：.*?\]/.source,
             /\[.*?同意了.*?的代付请求\]/.source,
             /\[.*?拒绝了.*?的代付请求\]/.source,
             /<thinking>[\s\S]*?<\/thinking>/.source,
             /^<thinking>[\s\S]*/.source,
+            /\[.*?更新了?拍一拍后缀为[：:].*?\]/.source,
             momentsRegex.source
         ].join('|'));
     } else {
@@ -393,12 +428,13 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
             /\[.*?(?:接收|退回).*?的转账\]/.source,
             /\[.*?更新状态为：.*?\]/.source,
             /\[.*?已接收礼物\]/.source,
-            /\[system:.*?\]/.source,
+            /\[system:[\s\S]*?\]/.source,
             /\[系统情景通知：.*?\]/.source,
             /\[.*?同意了.*?的代付请求\]/.source,
             /\[.*?拒绝了.*?的代付请求\]/.source,
             /<thinking>[\s\S]*?<\/thinking>/.source,
             /^<thinking>[\s\S]*/.source,
+            /\[.*?更新了?拍一拍后缀为[：:].*?\]/.source,
             momentsRegex.source
         ].join('|'));
     }
@@ -442,7 +478,7 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
         return wrapper;
     }
     // 【新增】 && !isThinking —— 只有当不是思考过程时，才允许渲染成系统通知气泡
-    if ((timeSkipMatch || inviteMatch || renameMatch || (updateStatusMatch && chat.showStatusUpdateMsg) || callInviteMatch || callRejectMatch) && !isThinking) {
+    if ((timeSkipMatch || inviteMatch || renameMatch || (updateStatusMatch && chat.showStatusUpdateMsg) || callInviteMatch || callRejectMatch || patMatch || voteEventMatch || qnAnswerMatch) && !isThinking) {
         wrapper.className = 'message-wrapper system-notification';
         if (message.isContextDisabled) wrapper.classList.add('context-disabled');
         let bubbleText = '';
@@ -452,6 +488,18 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
         if (updateStatusMatch) bubbleText = `${updateStatusMatch[1]} 更新状态为：${updateStatusMatch[2]}`;
         if (callInviteMatch) bubbleText = `${callInviteMatch[1]}向${callInviteMatch[2]}发起了${callInviteMatch[3]}通话`;
         if (callRejectMatch) bubbleText = `${callRejectMatch[1]}拒绝了${callRejectMatch[2]}的${callRejectMatch[3]}通话`;
+        if (qnAnswerMatch) {
+            const qt = (qnAnswerMatch[2] || '');
+            bubbleText = `${qnAnswerMatch[1]} 已回答问卷${qt ? '“' + (qt.length > 14 ? qt.slice(0, 14) + '…' : qt) + '”' : ''}`;
+        }
+        if (voteEventMatch) {
+            const vt = voteEventMatch[2].length > 14 ? voteEventMatch[2].slice(0, 14) + '…' : voteEventMatch[2];
+            bubbleText = `${voteEventMatch[1]} 在投票“${vt}”中${voteEventMatch[3]}「${voteEventMatch[4]}」`;
+        }
+        if (patMatch) {
+            const patTarget = (patMatch[2] === (chat.myName || '') || patMatch[2] === '你') ? '我' : patMatch[2];
+            bubbleText = `${patMatch[1]}拍了拍 ${patTarget}${patMatch[3] || ''}`;
+        }
         wrapper.innerHTML = `<div class="system-notification-bubble">${bubbleText}</div>`;
         return wrapper;
     }
@@ -495,10 +543,10 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
     let bubbleElement;
     const urlRegex = /^(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg)|data:image\/[a-z]+;base64,)/i;
     
-    const sentStickerRegex = /\[(?:.+?)发送的表情包[：:](.+?)\]/i;
+    const sentStickerRegex = /\[(?:.*?)发送的表情包[：:](.+?)\]/i;
     const receivedStickerRegex = /\[(?:.*?的)?表情包[：:](.+?)\]/i;
     
-    const voiceRegex = /\[(?:.+?)的语音[：:]([\s\S]+?)\]/;
+    const voiceRegex = /\[(?:.*?)的语音[：:]([\s\S]+?)\]/;
     const photoVideoRegex = /\[(?:.+?)发来的照片\/视频[：:]([\s\S]+?)\]/;
     const privateSentTransferRegex = /\[.*?给你转账[：:]([\d.,]+)元[；;]备注[：:](.*?)\]/;
     const privateReceivedTransferRegex = /\[.*?的转账[：:]([\d.,]+)元[；;]备注[：:](.*?)\]/;
@@ -506,7 +554,7 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
     const privateGiftRegex = /\[(?:.+?)送来的礼物[：:]([\s\S]+?)\]/;
     const groupGiftRegex = /\[(.*?)\s*向\s*(.*?)\s*送来了礼物[：:]([\s\S]+?)\]/;
     const imageRecogRegex = /\[.*?发来了一张图片[：:]\]/;
-    const textRegex = /\[(?:.+?)的消息[：:]([\s\S]+?)\]/;
+    const textRegex = /\[(?:.*?)的消息[：:]([\s\S]+?)\]/;
     const redPacketRegex = /\[(.*?)发出了一个拼手气红包[：:](.*?)元[；;]留言[：:](.*?)\]/;
     
     // 新版购物车小票格式: [A为B下单了：配送方式|总价|商品名 x数量]
@@ -538,7 +586,21 @@ const contentMatch = content.match(/^\[.*?(?:消息|回复)[：:]([\s\S]+)\]$/);
     const textMatch = content.match(textRegex);
     const redPacketMatch = content.match(redPacketRegex);
     
-    if (redPacketMatch || message.type === 'red-packet') {
+    if (message.vote && Array.isArray(message.vote.options)) {
+        bubbleElement = document.createElement('div');
+        bubbleElement.className = 'vote-card';
+        const voteBody = document.createElement('div');
+        voteBody.className = 'vote-card-body';
+        voteBody.innerHTML = (typeof renderVoteCardBody === 'function') ? renderVoteCardBody(message, chat) : '';
+        bubbleElement.appendChild(voteBody);
+    } else if (message.qn && Array.isArray(message.qn.questions)) {
+        bubbleElement = document.createElement('div');
+        bubbleElement.className = 'vote-card qn-card';
+        const qnBody = document.createElement('div');
+        qnBody.className = 'qn-card-body';
+        qnBody.innerHTML = (typeof renderQnCardBody === 'function') ? renderQnCardBody(message, chat) : '';
+        bubbleElement.appendChild(qnBody);
+    } else if (redPacketMatch || message.type === 'red-packet') {
         const senderName = redPacketMatch ? redPacketMatch[1] : (isSent ? '你' : '用户');
         const remark = message.remark || (redPacketMatch ? redPacketMatch[3] : '恭喜发财，大吉大利');
         
@@ -1158,11 +1220,11 @@ function addMessageBubble(message, targetChatId, targetChatType) {
         
         if (senderChat) {
             let invisibleRegex;
-            const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
+            const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|点赞了.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
             if (senderChat.showStatusUpdateMsg) {
                 // 在末尾添加 |<thinking>[\s\S]*?<\/thinking>
                 invisibleRegex = new RegExp([
-                    /\[system:.*?\]/.source,
+                    /\[system:[\s\S]*?\]/.source,
                     /\[.*?已接收礼物\]/.source,
                     /\[.*?(?:接收|退回).*?的转账\]/.source,
                     /\[.*?同意了.*?的代付请求\]/.source,
@@ -1175,7 +1237,7 @@ function addMessageBubble(message, targetChatId, targetChatType) {
             } else {
                 // 在末尾添加 |<thinking>[\s\S]*?<\/thinking>
                 invisibleRegex = new RegExp([
-                    /\[system:.*?\]/.source,
+                    /\[system:[\s\S]*?\]/.source,
                     /\[.*?更新状态为：.*?\]/.source,
                     /\[.*?已接收礼物\]/.source,
                     /\[.*?(?:接收|退回).*?的转账\]/.source,
@@ -1228,11 +1290,16 @@ function addMessageBubble(message, targetChatId, targetChatType) {
                 else if (message.parts && message.parts.some(p => p.type === 'html')) previewText = '[互动]';
             }
             
-            showToast({
-                avatar: senderAvatar,
-                name: senderName,
-                message: previewText.substring(0, 30)
-            });
+            const isUwUForeground = !document.hidden && document.visibilityState === 'visible';
+            const isIncomingMessage = message.role === 'assistant' && message.senderId !== 'user_me';
+            const isNotificationOnlyContent = /<\/?thinking>|更新状态(?:为)?|状态更新|状态栏|状态面板|^\[system-display:/i.test(String(message.originalContent || message.content || ''));
+            if (isUwUForeground && !window.__uwuSuppressInAppNotifications && isIncomingMessage && !isNotificationOnlyContent) {
+                showToast({
+                    avatar: senderAvatar,
+                    name: senderName,
+                    message: previewText.substring(0, 30)
+                });
+            }
         }
         return; 
     }
@@ -1354,7 +1421,7 @@ function addMessageBubble(message, targetChatId, targetChatType) {
         } else {
             let isContinuous = false;
             let invisibleRegex;
-            const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
+            const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|点赞了.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
             if (character.showStatusUpdateMsg) {
                 // 修改：正则末尾增加了 |<thinking>[\s\S]*?<\/thinking>
                 invisibleRegex = new RegExp([
@@ -1362,10 +1429,10 @@ function addMessageBubble(message, targetChatId, targetChatType) {
                     /\[.*?已接收礼物\]/.source,
                     /\[.*?同意了.*?的代付请求\]/.source,
                     /\[.*?拒绝了.*?的代付请求\]/.source,
-                    /\[system:.*?\]/.source,
+                    /\[system:[\s\S]*?\]/.source,
                     /\[.*?邀请.*?加入了群聊\]/.source,
                     /\[.*?修改群名为：.*?\]/.source,
-                    /\[system-display:.*?\]/.source,
+                    /\[system-display:[\s\S]*?\]/.source,
                     /\[.*?拒绝了.*?的(?:视频|语音)通话\]/.source,
                     /<thinking>[\s\S]*?<\/thinking>/.source,
                     /^<thinking>[\s\S]*/.source,
@@ -1379,17 +1446,17 @@ function addMessageBubble(message, targetChatId, targetChatType) {
                     /\[.*?已接收礼物\]/.source,
                     /\[.*?同意了.*?的代付请求\]/.source,
                     /\[.*?拒绝了.*?的代付请求\]/.source,
-                    /\[system:.*?\]/.source,
+                    /\[system:[\s\S]*?\]/.source,
                     /\[.*?邀请.*?加入了群聊\]/.source,
                     /\[.*?修改群名为：.*?\]/.source,
-                    /\[system-display:.*?\]/.source,
+                    /\[system-display:[\s\S]*?\]/.source,
                     /\[.*?拒绝了.*?的(?:视频|语音)通话\]/.source,
                     /<thinking>[\s\S]*?<\/thinking>/.source,
                     /^<thinking>[\s\S]*/.source,
                     momentsRegexSource
                 ].join('|'));
             }
-            const isSystemMsg = /\[system:.*?\]|\[system-display:.*?\]/.test(message.content);
+            const isSystemMsg = /\[system:[\s\S]*?\]|\[system-display:[\s\S]*?\]/.test(message.content);
 
             if (!isSystemMsg && character.history.length > 1) {
                 let prevMsg = null;
@@ -1445,16 +1512,16 @@ function addMessageBubble(message, targetChatId, targetChatType) {
         const group = db.groups.find(g => g.id === currentChatId);
         let isContinuous = false;
         let invisibleRegex;
-        const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
+        const momentsRegexSource = /\[(?:.*?)\s*(?:发布了一条(?:带图)?动态|评论了.*?|回复.*?|点赞了.*?|更新了个性签名)[：:][\s\S]+?\]/.source;
         if (group.showStatusUpdateMsg) {
             // 修改：正则末尾增加了 |<thinking>[\s\S]*?<\/thinking>
             invisibleRegex = new RegExp([
                 /\[.*?(?:接收|退回).*?的转账\]/.source,
                 /\[.*?已接收礼物\]/.source,
-                /\[system:.*?\]/.source,
+                /\[system:[\s\S]*?\]/.source,
                 /\[.*?邀请.*?加入了群聊\]/.source,
                 /\[.*?修改群名为：.*?\]/.source,
-                /\[system-display:.*?\]/.source,
+                /\[system-display:[\s\S]*?\]/.source,
                 /\[.*?拒绝了.*?的(?:视频|语音)通话\]/.source,
                 /<thinking>[\s\S]*?<\/thinking>/.source,
                 /^<thinking>[\s\S]*/.source,
@@ -1466,17 +1533,17 @@ function addMessageBubble(message, targetChatId, targetChatType) {
                 /\[.*?(?:接收|退回).*?的转账\]/.source,
                 /\[.*?更新状态为：.*?\]/.source,
                 /\[.*?已接收礼物\]/.source,
-                /\[system:.*?\]/.source,
+                /\[system:[\s\S]*?\]/.source,
                 /\[.*?邀请.*?加入了群聊\]/.source,
                 /\[.*?修改群名为：.*?\]/.source,
-                /\[system-display:.*?\]/.source,
+                /\[system-display:[\s\S]*?\]/.source,
                 /\[.*?拒绝了.*?的(?:视频|语音)通话\]/.source,
                 /<thinking>[\s\S]*?<\/thinking>/.source,
                 /^<thinking>[\s\S]*/.source,
                 momentsRegexSource
             ].join('|'));
         }
-        const isSystemMsg = /\[system:.*?\]|\[system-display:.*?\]/.test(message.content);
+        const isSystemMsg = /\[system:[\s\S]*?\]|\[system-display:[\s\S]*?\]/.test(message.content);
 
         if (!isSystemMsg && group.history.length > 1) {
             let prevMsg = null;

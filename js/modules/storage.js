@@ -33,7 +33,9 @@ function formatBytes(bytes, decimals = 2) {
 
 function stringifySize(obj) {
     try {
-        return obj ? JSON.stringify(obj).length : 0;
+        if (!obj) return 0;
+        // Measure UTF-8 bytes rather than JavaScript UTF-16 character count.
+        return new Blob([JSON.stringify(obj)]).size;
     } catch (e) {
         return 0;
     }
@@ -54,20 +56,57 @@ async function calculateStorageSize() {
 
     if (!db || !db.characters) await loadData();
 
-    // 1. chats & contacts & other(gallery)
+    // 1. 聊天记录 / 角色设定 / 生图缓存
+    // history、callHistory 和 archives 都属于聊天数据。
+    // archives 是聊天分支/存档，不能漏算，也不能算进角色设定。
     (db.characters || []).forEach(char => {
+        // 当前聊天记录
         sizes.chats += stringifySize(char.history);
+
+        // 通话记录
         sizes.chats += stringifySize(char.callHistory);
+
+        // 聊天存档 / 分支
+        // The selected archive is duplicated in char.history and in its
+        // archive.data snapshot. Count only archive metadata for the active
+        // archive; inactive archives still contain unique saved histories.
+        const archivesForSize = (char.archives || []).map(archive =>
+            archive.id === char.activeArchiveId ? { ...archive, data: {} } : archive
+        );
+        sizes.chats += stringifySize(archivesForSize);
+
+        // 图片缓存单独计算
         sizes.other += stringifySize(char.gallery);
-        
-        const charBase = { ...char, history: undefined, callHistory: undefined, gallery: undefined };
+
+        // 角色设定只计算真正的角色资料，
+        // 排除聊天、通话、存档、图片缓存以及存档状态信息。
+        const charBase = { ...char };
+        delete charBase.history;
+        delete charBase.callHistory;
+        delete charBase.gallery;
+        delete charBase.archives;
+        delete charBase.activeArchiveId;
+        delete charBase.unreadCount;
+
         sizes.contacts += stringifySize(charBase);
     });
+
+    // 群聊也会保存消息、通话记录与存档；与角色数据分开统计，避免漏掉群聊容量。
     (db.groups || []).forEach(group => {
         sizes.chats += stringifySize(group.history);
         sizes.chats += stringifySize(group.callHistory);
-        
-        const groupBase = { ...group, history: undefined, callHistory: undefined };
+
+        const archivesForSize = (group.archives || []).map(archive =>
+            archive.id === group.activeArchiveId ? { ...archive, data: {} } : archive
+        );
+        sizes.chats += stringifySize(archivesForSize);
+
+        const groupBase = { ...group };
+        delete groupBase.history;
+        delete groupBase.callHistory;
+        delete groupBase.archives;
+        delete groupBase.activeArchiveId;
+        delete groupBase.unreadCount;
         sizes.contacts += stringifySize(groupBase);
     });
 
@@ -101,7 +140,7 @@ async function calculateStorageSize() {
         'globalReceiveSound', 'multiMsgSoundEnabled', 'soundPresets', 'galleryPresets', 
         'hasSeenVideoCallDisclaimer', 'hasSeenVideoCallAvatarHint', 'workshopSettings', 
         'workshopLlmPresets', 'workshopPromptPresets', 'homeLayoutOrder', 'homeLayoutPages', 
-        'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked'
+        'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked', 'homeScreenPresets'
     ];
     settingsKeys.forEach(key => {
         sizes.settings += stringifySize(db[key]);
@@ -225,14 +264,27 @@ function updateSelectAllBtn() {
 function setupStorageAnalysisScreen() {
     const screen = document.getElementById('storage-analysis-screen');
     if (!screen) return;
+    if (screen.dataset.storageAnalysisBound === 'true') return;
+    screen.dataset.storageAnalysisBound = 'true';
 
-    const observer = new MutationObserver(async (mutations) => {
-        if (screen.classList.contains('active')) {
-            showToast('正在分析存储空间...');
+    let analysisInProgress = false;
+    const observer = new MutationObserver(() => {
+        if (!screen.classList.contains('active') || analysisInProgress) return;
+        analysisInProgress = true;
+        // Defer one microtask so multiple class mutations from switchScreen()
+        // settle before starting the storage scan. Avoid repeatedly flashing
+        // the analysis toast while IndexedDB tables are being read on iOS.
+        Promise.resolve().then(async () => {
+            if (!screen.classList.contains('active')) return;
             currentStorageSizes = await calculateStorageSize();
+            if (!screen.classList.contains('active')) return;
             renderStorageUI();
-            updatePersistenceStatus();
-        }
+            await updatePersistenceStatus();
+        }).catch(error => {
+            console.warn('存储空间分析失败：', error);
+        }).finally(() => {
+            analysisInProgress = false;
+        });
     });
 
     observer.observe(screen, { attributes: true, attributeFilter: ['class'] });
@@ -320,13 +372,26 @@ async function handleExport() {
 
             db.characters.forEach(char => {
                 let exportChar = { ...char };
+                exportChar.archives = (char.archives || []).map(archive =>
+                    archive.id === char.activeArchiveId ? { ...archive, data: {} } : archive
+                );
                 if (!selectedModules.chats) {
                     exportChar.history = [];
                     exportChar.callHistory = [];
+                    exportChar.archives = exportChar.archives.map(archive => ({ ...archive, data: {} }));
                 }
                 if (!selectedModules.contacts) {
                     // If only exporting chats, we still need basic info to identify the char
-                    exportChar = { id: char.id, name: char.name, history: char.history, callHistory: char.callHistory };
+                    exportChar = {
+                        id: char.id,
+                        name: char.name,
+                        activeArchiveId: char.activeArchiveId,
+                        archives: selectedModules.chats ? (char.archives || []).map(archive =>
+                            archive.id === char.activeArchiveId ? { ...archive, data: {} } : archive
+                        ) : (char.archives || []).map(archive => ({ ...archive, data: {} })),
+                        history: selectedModules.chats ? char.history : [],
+                        callHistory: selectedModules.chats ? char.callHistory : []
+                    };
                 }
                 // 始终不导出 gallery
                 exportChar.gallery = [];
@@ -335,12 +400,25 @@ async function handleExport() {
 
             db.groups.forEach(group => {
                 let exportGroup = { ...group };
+                exportGroup.archives = (group.archives || []).map(archive =>
+                    archive.id === group.activeArchiveId ? { ...archive, data: {} } : archive
+                );
                 if (!selectedModules.chats) {
                     exportGroup.history = [];
                     exportGroup.callHistory = [];
+                    exportGroup.archives = exportGroup.archives.map(archive => ({ ...archive, data: {} }));
                 }
                 if (!selectedModules.contacts) {
-                    exportGroup = { id: group.id, name: group.name, history: group.history, callHistory: group.callHistory };
+                    exportGroup = {
+                        id: group.id,
+                        name: group.name,
+                        activeArchiveId: group.activeArchiveId,
+                        archives: selectedModules.chats ? (group.archives || []).map(archive =>
+                            archive.id === group.activeArchiveId ? { ...archive, data: {} } : archive
+                        ) : (group.archives || []).map(archive => ({ ...archive, data: {} })),
+                        history: selectedModules.chats ? group.history : [],
+                        callHistory: selectedModules.chats ? group.callHistory : []
+                    };
                 }
                 exportData.modules.groups.push(exportGroup);
             });
@@ -385,7 +463,7 @@ async function handleExport() {
                 'globalReceiveSound', 'multiMsgSoundEnabled', 'soundPresets', 'galleryPresets', 
                 'hasSeenVideoCallDisclaimer', 'hasSeenVideoCallAvatarHint', 'workshopSettings', 
                 'workshopLlmPresets', 'workshopPromptPresets', 'homeLayoutOrder', 'homeLayoutPages', 
-                'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked'
+                'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked', 'homeScreenPresets'
             ];
             settingsKeys.forEach(key => {
                 exportData.modules[key] = db[key];
@@ -409,7 +487,7 @@ async function handleExport() {
             downloadAnchorNode.remove();
             URL.revokeObjectURL(url);
             
-            showToast('导出成功');
+            showToast(`导出成功，压缩后 ${formatBytes(compressedBlob.size)}`);
         } catch (compressError) {
             console.warn('压缩导出失败，尝试降级为未压缩导出:', compressError);
             // 降级为未压缩的 JSON 导出
@@ -422,7 +500,7 @@ async function handleExport() {
             downloadAnchorNode.remove();
             URL.revokeObjectURL(url);
             
-            showToast('导出成功 (未压缩)');
+            showToast(`导出成功（未压缩 ${formatBytes(dataBlob.size)}）`);
         }
     } catch (error) {
         console.error('导出失败:', error);
@@ -564,12 +642,21 @@ async function handleImport(event) {
                     'globalReceiveSound', 'multiMsgSoundEnabled', 'soundPresets', 'galleryPresets', 
                     'hasSeenVideoCallDisclaimer', 'hasSeenVideoCallAvatarHint', 'workshopSettings', 
                     'workshopLlmPresets', 'workshopPromptPresets', 'homeLayoutOrder', 'homeLayoutPages', 
-                    'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked'
+                    'widgetTemplates', 'addedWidgets', 'backupReminderSettings', 'stUnlocked', 'homeScreenPresets'
                 ];
                 settingsKeys.forEach(key => {
                     if (mods[key] !== undefined) {
                         db[key] = mods[key];
                     }
+                });
+            }
+
+            // 导入的角色自动消息设置（含安静时段）要同步给 Cloudflare 后台，
+            // 否则 Worker 仍按导入前的旧设置发主动消息。标记待同步，下次启动开启 CF 后台时自动补发。
+            if (selectedModules.contacts && Array.isArray(mods.characters)) {
+                const importedIds = new Set(mods.characters.map(c => c && c.id));
+                db.characters.forEach(c => {
+                    if (importedIds.has(c.id) && c.autoReply) c.autoReplySyncPending = true;
                 });
             }
 

@@ -672,7 +672,11 @@ function renderWidgetList(container, templates, isModal = false, isTemplateLibra
         // 在 Bottom Sheet 网格中，预览框宽度约为容器的一半减去间距
         const isBottomSheet = container.classList.contains('widget-add-grid');
         const padding = 20;
-        const availableWidth = isBottomSheet ? (window.innerWidth * 0.45 - padding) : (140 - padding);
+        const wideCard = template.size === '4x2' || template.size === '4x4'; // 这两种卡片占满两列
+        const sheetWidth = Math.min(window.innerWidth, 500);
+        const availableWidth = isBottomSheet
+            ? (wideCard ? sheetWidth - 40 - 24 : sheetWidth * 0.45 - padding)
+            : (140 - padding);
         const scale = Math.min(1, availableWidth / baseWidth);
         scaleWrapper.style.transform = `scale(${scale})`;
         

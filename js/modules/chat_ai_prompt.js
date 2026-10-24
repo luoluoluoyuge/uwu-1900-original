@@ -37,6 +37,11 @@ function generatePrivateSystemPrompt(character) {
         }
         
         prompt += `4.语音消息: [${character.realName}的语音：语音内容]\n`;
+        if (character.videoCallEnabled) {
+            prompt += `角色主动发起视频通话: [${character.realName}向${character.myName}发起了视频通话]\n`;
+            prompt += `角色主动发起语音通话: [${character.realName}向${character.myName}发起了语音通话]\n`;
+            prompt += `  - 仅在符合角色性格和当前情境时主动发起，例如想面对面分享事情、需要即时陪伴或有自然的通话理由；不要每轮都发起，也不要把通话指令当作普通文字发送。\n`;
+        }
         prompt += `5.引用消息: [${character.realName}引用“引用的内容”并回复：回复的内容]\n  - 当${character.myName}发送多条消息且包含多个信息点时，灵活运用引用消息，单条回复无需引用。\n  - 在进行引用消息的前提下前后回复顺序颠倒。\n  - 可以进行多次引用。\n`;
         
         if (character.bilingualModeEnabled) {
@@ -56,12 +61,22 @@ function generatePrivateSystemPrompt(character) {
         
         if (character.momentsEnabled !== false) {
             prompt += `13.朋友圈动态: [${character.realName}发布了一条动态：xxx] 或 [${character.realName}发布了一条带图动态：图片画面描述|动态文字内容]\n`;
-            prompt += `  - 评论互动：模拟${character.realName}或${character.realName}的其他好友在动态下的评论或回复。格式：[{评论者姓名}评论了{被评论者姓名}的动态“{动态内容缩略}”：xxx] 或 [{回复者姓名}回复了{被回复者姓名}在动态“{动态内容缩略}”下的评论：xxx]。\n  - 更新签名：更新你的朋友圈个性签名。格式：[${character.realName}更新了个性签名：xxx]。\n`;
+            prompt += `  - 评论互动：模拟${character.realName}或${character.realName}的其他好友在动态下的评论或回复。格式：[{评论者姓名}评论了{被评论者姓名}的动态“{动态内容缩略}”：xxx] 或 [{回复者姓名}回复了{被回复者姓名}在动态“{动态内容缩略}”下的评论：xxx]。\n  - 点赞动态：给动态点赞。格式：[{点赞者姓名}点赞了{被点赞者姓名}的动态：{动态内容缩略}]，可以点赞{{user}}的动态，也可以模拟好友点赞。\n  - 更新签名：更新你的朋友圈个性签名。格式：[${character.realName}更新了个性签名：xxx]。\n`;
         }
         
         prompt += `14.隐藏指令(不显示给用户，但必须回复以触发状态变化):\n  - 接收礼物: [${character.realName}已接收礼物]\n  - 接收/退回转账: [${character.realName}接收${character.myName}的转账] 或 [${character.realName}退回${character.myName}的转账]\n  - 同意/拒绝代付: [${character.realName}同意了${character.myName}的代付请求] 或 [${character.realName}拒绝了${character.myName}的代付请求]\n`;
         
-        prompt += `</消息格式库>\n\n`;
+        prompt += `15-a.投票(聊天里显示为投票卡片): 发起: [${character.realName}发起了投票：标题|选项1|选项2|…]（至少2个选项）；选择: [${character.realName}在投票“标题”中选择了：选项原文]；添加选项（只能加，不能删）: [${character.realName}在投票“标题”中添加了选项：新选项]。可用于二选一、问答、小游戏；用户也可能发起投票，用户发起后你可以自己选一个并说说理由。投票是可选的小互动，只在用户提议或确实适合时才用，不要滥用。${character.bilingualModeEnabled ? '双语模式下，当你的母语不是中文时，投票的标题和每个选项都写成“外语原文「中文翻译」”，标题也一定要带翻译（例如标题：What should we eat?「我们吃什么？」，选项：Ramen「拉面」），不要漏掉「」里的中文翻译，翻译要简短；你选择或添加选项时同样这样写。' : ''}⚠️选择和添加选项必须真的输出上面的指令才会生效，只在聊天文字里说“我加了/我选了”是不会有任何变化的；选项名要和卡片上的完全一致。\n`;
+        if (character.patEnabled) {
+            const curSuffix = (character.patCharSuffix === undefined) ? '的脑袋' : (character.patCharSuffix || '');
+            prompt += `15-c.拍一拍(微信式的轻互动，显示成一行小字，不是气泡): [${character.realName}拍了拍${character.myName}]。只在情绪合适时偶尔使用（比如撒娇、和好、打招呼、想引起注意），不要每次回复都用，也不要连续多次拍。后缀由系统按用户设置自动补上，你不要自己写后缀。\n`;
+            if (character.patAiSuffix) {
+                prompt += `  - 修改你被拍时显示的后缀(此条不显示): [${character.realName}更新了拍一拍后缀为：后缀]。用户拍你时会显示“我拍了拍 ${character.realName}后缀”，你当前的后缀是“${curSuffix || '（空）'}”，后缀要简短（8字以内，如“的尾巴”“的脸颊”），符合你的性格，只在想改的时候才改。\n`;
+            }
+            prompt += `  - 当你在上下文里看到 [system: …拍了拍你…] 时，表示用户拍了拍你，请像真人一样自然回应，可以说话，也可以再拍回去。\n`;
+        }
+        
+        prompt += `15-b.问卷(聊天里显示为问卷卡片，用文字回答): 双向(两人都填了才一起揭晓): [${character.realName}发起了双向问卷：标题|问题1|问题2|…]；单向(只有收到问卷的一方填写，填完就揭晓): [${character.realName}发起了单向问卷：标题|问题1|问题2|…]；题数1~10。回答: [${character.realName}回答了问卷“标题”：答案1|答案2|…]（按题目顺序，用|分隔，答案里不要出现|或方括号，每题一两句话）\n  - ${character.myName}发起的问卷（上下文里是 [${character.myName}发起了双向/单向问卷：…]），你在下一次回复时请回答（按你自己的真实想法答，不要去猜${character.myName}会怎么答）；你发起双向问卷时，必须在同一次回复里紧接着用回答指令给出你自己的答案；你发起单向问卷时不要自己回答，等${character.myName}填写。看到 [system: …问卷已揭晓…] 后可以自然地聊聊答案；还没揭晓时不要透露或猜测对方的答案。问题要贴合你们的关系和聊天内容，别太泛。${character.bilingualModeEnabled ? '双语模式下，当你的母语不是中文时，问卷的标题、每道题和你的每个答案都写成“外语原文「中文翻译」”（例如：What is your favorite food?「你最喜欢的食物是什么？」），不要漏掉「」里的中文翻译。' : ''}⚠️必须真的输出指令才生效。\n`;
         
         prompt += `<参考资料>\n`;
         if (worldBooksBefore) prompt += `${worldBooksBefore}\n`;
@@ -211,6 +226,7 @@ b) [${character.realName}拒绝了${character.myName}的代付请求]
    b) **发布带图动态**：分享带有配图的动态。格式：[${character.realName}发布了一条带图动态：图片画面描述|动态文字内容]。例如：[${character.realName}发布了一条带图动态：一杯拉花拿铁放在木桌上，阳光洒在旁边|今天的咖啡很不错]。
    c) **评论互动**：你可以模拟自己或其他好友在动态下的评论或回复。格式：[{评论者姓名}评论了{被评论者姓名}的动态“{动态内容缩略}”：xxx] 或 [{回复者姓名}回复了{被回复者姓名}在动态“{动态内容缩略}”下的评论：xxx]。你可以用自己的名字，也可以编造其他好友的名字来模拟评论区。
    d) **更新签名**：更新你的朋友圈个性签名。格式：[${character.realName}更新了个性签名：xxx]。
+   f) **点赞动态**：给动态点赞。格式：[{点赞者姓名}点赞了{被点赞者姓名}的动态：{动态内容缩略}]。可以点赞我（{{user}}）的动态，也可以模拟好友点赞，别太频繁。
    e) **玩家互动感知**：我的消息中可能会出现 [system: {用户真名}点赞了{char真名}的动态：{动态内容缩略}...] 或 [system: {用户真名}评论了{char真名}的动态：{动态内容缩略}...：{评论内容}]，这代表我对你的动态进行了互动，你可以使用朋友圈互动指令来回复我的评论或在聊天里自然的提起。
 
 `;
@@ -282,12 +298,30 @@ q) 求代付: [${character.realName}向${character.myName}发起了代付请求:
     }
 
     outputFormats += `
+ab) 问卷（聊天里显示为问卷卡片，用文字回答）: 双向问卷（两人都填了才一起揭晓）: [${character.realName}发起了双向问卷：{标题}|{问题1}|{问题2}|…]；单向问卷（只有收到问卷的一方填写，填完就揭晓）: [${character.realName}发起了单向问卷：{标题}|{问题1}|{问题2}|…]；题数1~10。回答: [${character.realName}回答了问卷“{标题}”：{答案1}|{答案2}|…]（按题目顺序，用|分隔，答案里不要出现|或方括号，每题一两句话）。规则：${character.myName}发起的问卷（上下文里是 [${character.myName}发起了双向/单向问卷：…]），你在下一次回复时请回答（按你自己的真实想法答，不要去猜${character.myName}会怎么答）；你发起双向问卷时，必须在同一次回复里紧接着用回答指令给出你自己的答案；你发起单向问卷时不要自己回答，等${character.myName}填写。看到 [system: …问卷已揭晓…] 后可以自然地聊聊答案；还没揭晓时不要透露或猜测对方的答案。${character.bilingualModeEnabled ? '双语模式下，当你的母语不是中文时，问卷的标题、每道题和你的每个答案都写成“外语原文「中文翻译」”（例如：What is your favorite food?「你最喜欢的食物是什么？」），不要漏掉「」里的中文翻译。' : ''}⚠️必须真的输出指令才生效。`;
+    outputFormats += `
+y) 发起投票（聊天里显示为投票卡片）: [${character.realName}发起了投票：{标题}|{选项1}|{选项2}|…]（至少2个选项）。可用于二选一、问答、小游戏；用户也可能发起投票。${character.bilingualModeEnabled ? '双语模式下，当你的母语不是中文时，投票的标题和每个选项都写成“外语原文「中文翻译」”，标题也一定要带翻译（例如标题：What should we eat?「我们吃什么？」，选项：Ramen「拉面」），不要漏掉「」里的中文翻译，翻译要简短；你选择或添加选项时同样这样写。' : ''}
+z) 在投票里选择: [${character.realName}在投票“{标题}”中选择了：{选项原文}]；添加选项（只能加，不能删）: [${character.realName}在投票“{标题}”中添加了选项：{新选项}]。投票是可选的小互动，只在用户提议或确实适合时才用，不要滥用；用户发起投票后，你可以自己选一个并说说理由。⚠️选择和添加选项必须真的输出上面的指令才会生效，只在聊天文字里说“我加了/我选了”是不会有任何变化的；选项名要和卡片上的完全一致。`;
+    if (character.patEnabled) {
+        const curSuffix = (character.patCharSuffix === undefined) ? '的脑袋' : (character.patCharSuffix || '');
+        outputFormats += `
+w) 拍一拍（微信式的轻互动，显示成一行小字，不是气泡）: [${character.realName}拍了拍${character.myName}]。只在情绪合适时偶尔使用（比如撒娇、和好、打招呼、想引起注意），不要每次回复都用，也不要连续多次拍。后缀由系统按用户设置自动补上，你不要自己写后缀。`;
+        if (character.patAiSuffix) {
+            outputFormats += `
+x) 修改你被拍时显示的后缀(此条不显示): [${character.realName}更新了拍一拍后缀为：{后缀}]。用户拍你时会显示“我拍了拍 ${character.realName}{后缀}”，你当前的后缀是“${curSuffix || '（空）'}”，后缀要简短（8字以内，如“的尾巴”“的脸颊”），符合你的性格，只在想改的时候才改。`;
+        }
+        outputFormats += `
+（当你在上下文里看到 [system: …拍了拍你…] 时，表示用户拍了拍你，请像真人一样自然回应，可以说话，也可以用 w) 拍回去。）`;
+    }
+
+    outputFormats += `
 r) 转发聊天记录: <${character.realName}转发的聊天记录>聊天记录内容</${character.realName}转发的聊天记录>。聊天记录内容由你自行编造，格式如“A：xxx\\nB：xxx”。`;
     if (character.momentsEnabled !== false) {
         outputFormats += `
 s) 发布动态：分享生活、心情、见闻。格式：[${character.realName}发布了一条动态：xxx]
 t) 发布带图动态：[${character.realName}发布了一条带图动态：图片画面描述|动态文字内容]
 u) 评论互动：[{评论者姓名}评论了 {被评论者姓名}的动态“{动态内容缩略}”：xxx] 或 [{回复者姓名}回复了 {被回复者姓名}在动态“{动态内容缩略}”下的评论：xxx]
+w) 点赞动态：[{点赞者姓名}点赞了{被点赞者姓名}的动态：{动态内容缩略}]。
 v) 更新签名：[${character.realName}更新了个性签名：xxx]。`;
     }
 
@@ -315,6 +349,9 @@ v) 更新签名：[${character.realName}更新了个性签名：xxx]。`;
     }
     
     prompt += `19. **特殊消息格式的使用原则**：(1)请把除普通消息外的其他特殊消息视为增强互动的“调味剂”，遵循**自然、主动、多样化触发逻辑。同种消息格式不要重复频繁发送，不同消息格式不要用户不提就一直不发**。\n(2)注意在本回合消息列里，特殊消息插入位置的随机性，每轮必须和上一回合插入位置不同。\n`;
+    if (character.videoCallEnabled) {
+        prompt += `✨角色主动通话✨：你可以根据角色性格和当前情境，自然地主动发起语音或视频通话，例如想即时陪伴${character.myName}、分享需要面对面表达的事情，或情境确实适合通话时。请勿每轮都发起；发起时必须使用上方对应的通话指令格式。\n`;
+    }
     prompt += `20. 🌟**防复读对话**🌟：在本轮回复中，你**必须**区别于先前的聊天记录进行句式和词汇的变换，**绝对不要**重复或模仿历史记录中的文本结构，保持自然、随机和多样性。\n`;
 
     prompt += `</Chatting Guidelines>\n`

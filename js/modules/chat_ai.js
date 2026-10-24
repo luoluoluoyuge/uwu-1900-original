@@ -1,5 +1,10 @@
 // --- AI 交互模块 ---
 
+let activeAiAbortController = null;
+// 暂停按钮：回复已经收完、正在一条条显示时，也要能中途停下来（abort 只能中断网络请求）。
+let aiStopGeneration = 0;
+let aiDisplayingReply = false;
+
 const HUMAN_RUN_PROMPT = `<角色活人运转>\n## [PSYCHOLOGY: HEXACO-SCHEMA-ACT]\n> Personality: HEXACO-driven, dynamic traits, inner conflicts required \n> Filter: schema-bias drives emotion; no pure reaction allowed \n> Attachment: secure/insecure logic must govern intimacy  \n> If-Then Behavior: situation-dependent activation of traits only  \n---\n    ## [VITALITY]\n+inconsistency +emoflux +splitmotifs +microreact +minddrift\n---\n## [TRAJECTORY-COHERENCE]\n> Role maintains an identity narrative = coherent over time  \n> No mood/goal switch without contradiction resolution \n> Every action must protect or challenge self-concept  \n> Interrupts = inner conflict or narrative clash  \n> Output = filtered through “who I am” logic\n</角色活人运转>`;
 
 // AI 交互逻辑
@@ -16,6 +21,10 @@ async function getAiReply(chatId, chatType, isBackground = false) {
 
     const chat = (chatType === 'private') ? db.characters.find(c => c.id === chatId) : db.groups.find(g => g.id === chatId);
     if (!chat) return;
+
+    // 记录本次请求的发起时间：回复成功后，据此判断角色「看到」了哪些用户动态。
+    window.__aiReqStart = window.__aiReqStart || {};
+    window.__aiReqStart[chatId] = Date.now();
 
     let apiConfig = db.apiSettings;
     
@@ -36,18 +45,27 @@ async function getAiReply(chatId, chatType, isBackground = false) {
         }
     }
 
-    let {url, key, model, provider, streamEnabled} = apiConfig; 
+    // 自动消息（主动消息）可以改用副 API，节省主 API 额度；没勾选就保持原样。
+    if (isBackground) apiConfig = resolveAuxiliaryApiConfig('autoMessage', apiConfig);
+
+    let {url, key, model, provider, streamEnabled} = apiConfig;
+    const cloudflareBackendEnabled = window.UwUBackendAdapter && window.UwUBackendAdapter.isCloudflareEnabled();
     if (!url || !key || !model) {
-        if (!isBackground) {
-            showToast('请先在“api”应用中完成设置！');
-            switchScreen('api-settings-screen');
+        // Cloudflare 模式由 Worker 持有真正的 AI API 配置，前端可以不填写本地 API。
+        if (!cloudflareBackendEnabled) {
+            if (!isBackground) {
+                showToast('请先在“api”应用中完成设置！');
+                switchScreen('api-settings-screen');
+            }
+            return;
         }
-        return;
+        provider = provider || 'newapi';
+        streamEnabled = false;
     }
 
     // 确保 BLOCKED_API_DOMAINS 存在
     const blockedDomains = (typeof BLOCKED_API_DOMAINS !== 'undefined') ? BLOCKED_API_DOMAINS : [];
-    if (blockedDomains.some(domain => url.includes(domain))) {
+    if (url && blockedDomains.some(domain => url.includes(domain))) {
         if (!isBackground) showToast('当前 API 站点已被屏蔽，无法发送消息！');
         return;
     }
@@ -56,8 +74,12 @@ async function getAiReply(chatId, chatType, isBackground = false) {
         url = url.slice(0, -1);
     }
 
+    let claimedBackendJobId = '';
+    let aiAbortController = null;
     if (!isBackground) {
         isGenerating = true;
+        aiAbortController = new AbortController();
+        activeAiAbortController = aiAbortController;
         getReplyBtn.disabled = true;
         regenerateBtn.disabled = true;
         const typingName = chatType === 'private' ? chat.remarkName : chat.name;
@@ -487,23 +509,88 @@ async function getAiReply(chatId, chatType, isBackground = false) {
         logText += "============================================";
         console.log(logText);
 
-        const endpoint = (provider === 'gemini') ? `${url}/v1beta/models/${model}:streamGenerateContent?key=${getRandomValue(key)}` : `${url}/v1/chat/completions`;
-        const headers = (provider === 'gemini') ? {'Content-Type': 'application/json'} : {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${key}`
-        };
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody)
-        });
+        if (cloudflareBackendEnabled) {
+            try {
+                const autoReply = chatType === 'private' && chat.autoReply ? {
+                    enabled: !!chat.autoReply.enabled,
+                    interval: Number(chat.autoReply.interval || 60),
+                    lastTriggerTime: Number(chat.autoReply.lastTriggerTime || 0),
+                    quietHours: chat.autoReply.quietHours && chat.autoReply.quietHours.enabled ? {
+                        enabled: true,
+                        start: chat.autoReply.quietHours.start || '00:00',
+                        end: chat.autoReply.quietHours.end || '08:00',
+                        timezone: chat.autoReply.quietHours.timezone || (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+                    } : { enabled: false }
+                } : { enabled: false };
+                await window.UwUBackendAdapter.syncChatState({
+                    chatId, chatType, realName: chat.realName || chat.name || '',
+                    remarkName: chatType === 'private' ? (chat.remarkName || chat.realName || '') : (chat.name || ''),
+                    chatStatusRegex: chatType === 'private' && chat.statusPanel?.enabled ? (chat.statusPanel.regexPattern || '') : '',
+                    myName: chat.myName || '用户',
+                    requestBody, autoReply
+                });
+            } catch (syncError) {
+                console.warn('[UwUBackend] 同步聊天状态失败：', syncError);
+            }
+        }
+        let response;
+        let backendFailure = null;
+        if (cloudflareBackendEnabled) {
+            try {
+                response = await window.UwUBackendAdapter.fetchAI({
+                    requestBody, chatId, chatType,
+                    chatName: chatType === 'private' ? (chat.remarkName || chat.realName || chat.name || '') : (chat.name || chat.realName || ''),
+                    chatStatusRegex: chatType === 'private' && chat.statusPanel?.enabled ? (chat.statusPanel.regexPattern || '') : '',
+                    isBackground,
+                    signal: aiAbortController ? aiAbortController.signal : undefined
+                });
+                // Worker 第一版返回普通 JSON，即使用户保留了流式开关也不改变本地模式。
+                streamEnabled = false;
+            } catch (backendError) {
+                console.warn('[UwUBackend] 后台 AI 请求失败，回退本地 API：', backendError);
+                backendFailure = backendError;
+                if (!isBackground && url && key && model) {
+                    const errorName = backendError && backendError.name ? String(backendError.name) : 'Error';
+                    const errorMessage = backendError && backendError.message ? String(backendError.message) : String(backendError || '未知错误');
+                    showToast(`后台服务暂时不可用，已回退本地 API：${errorName}：${errorMessage}`);
+                }
+                response = null;
+            }
+        }
+
+        if (!response && (!url || !key || !model)) {
+            throw backendFailure || new Error('Cloudflare 后台服务不可用，且未配置本地 API');
+        }
+
+        if (!response) {
+            const endpoint = (provider === 'gemini') ? `${url}/v1beta/models/${model}:streamGenerateContent?key=${getRandomValue(key)}` : `${url}/v1/chat/completions`;
+            const headers = (provider === 'gemini') ? {'Content-Type': 'application/json'} : {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${key}`
+            };
+            response = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestBody),
+                ...(aiAbortController ? { signal: aiAbortController.signal } : {})
+            });
+        }
         if (!response.ok) {
             const error = new Error(`API Error: ${response.status} ${await response.text()}`);
             error.response = response;
             throw error;
         }
+
+        const backendJobId = response.headers?.get('X-UwU-Job-Id') || '';
+        // 认领这条后台回复；若通知同步那边正在处理同一条，这里就不再重复显示。
+        const jobClaimed = !backendJobId || window.UwUBackendAdapter.claimJob(backendJobId);
+        if (backendJobId && jobClaimed) claimedBackendJobId = backendJobId;
+        const alreadyPulledFromBackend = backendJobId && (!jobClaimed || chat.history?.some(item => item.id === backendJobId || item.backendJobId === backendJobId));
+        const replyBeforeIds = new Set((chat.history || []).map(item => item.id));
         
-        if (streamEnabled) {
+        if (alreadyPulledFromBackend) {
+            console.log('[UwUBackend] 后台回复已在恢复时同步，跳过重复显示。');
+        } else if (streamEnabled) {
             await processStream(response, chat, provider, chatId, chatType, isBackground);
         } else {
             let result;
@@ -535,20 +622,81 @@ async function getAiReply(chatId, chatType, isBackground = false) {
             // ===================================
             
             
-            await handleAiReplyContent(fullResponse, chat, chatId, chatType, isBackground);
+            // Queue replies were generated while the app was suspended; replay all
+            // parsed messages immediately when the app returns to the foreground.
+            // 后台任务的回复，Worker 完成时已经推送过系统通知，本地不再重复弹。
+            const previousSystemSuppression = window.__uwuSuppressSystemNotifications;
+            if (backendJobId) window.__uwuSuppressSystemNotifications = true;
+            try {
+                await handleAiReplyContent(fullResponse, chat, chatId, chatType, isBackground || !!backendJobId);
+            } finally {
+                window.__uwuSuppressSystemNotifications = previousSystemSuppression;
+            }
+        }
+        if (backendJobId && jobClaimed) {
+            const newReplyItems = (chat.history || []).filter(item => !replyBeforeIds.has(item.id));
+            for (const item of newReplyItems) item.backendJobId = backendJobId;
+            // App 被切到后台时，回复其实早就生成了；时间戳要用后台完成的时间，
+            // 而不是切回 App 之后本地处理的时间。
+            const completedAt = Number(response.headers?.get('X-UwU-Job-Completed-At'));
+            const shift = window.UwUBackendAdapter.alignTimestamps(newReplyItems, completedAt);
+            if (shift && Math.abs(shift) > 1000 && currentChatId === chatId && typeof renderMessages === 'function') {
+                renderMessages(false, true);
+            }
+            // 时间改回后台完成的时间后，聊天列表也要刷新，否则列表一直显示「切回来」的时间，要重开 App 才对。
+            if (shift && typeof renderChatList === 'function') renderChatList();
+            await saveData();
+            await window.UwUBackendAdapter.ackAIJob(backendJobId);
         }
 
     } catch (error) {
-        if (!isBackground) showApiError(error);
-        else console.error("Background Auto-Reply Error:", error);
+        if (error && error.name === 'AbortError') {
+            if (!isBackground) showToast('已停止本次回复调用');
+        } else if (!isBackground) {
+            showApiError(error);
+        } else {
+            console.error("Background Auto-Reply Error:", error);
+        }
     } finally {
+        if (claimedBackendJobId) window.UwUBackendAdapter.releaseJob(claimedBackendJobId);
         if (!isBackground) {
+            aiDisplayingReply = false;
+            if (activeAiAbortController === aiAbortController) activeAiAbortController = null;
             isGenerating = false;
             getReplyBtn.disabled = false;
             regenerateBtn.disabled = false;
             typingIndicator.style.display = 'none';
+            if (window.syncBackendMessages) setTimeout(() => window.syncBackendMessages(), 0);
+        }
+        if (typeof maybeAutoSummarizeJournal === 'function') {
+            setTimeout(() => { maybeAutoSummarizeJournal(chatId, chatType).catch(err => console.error(err)); }, 300);
         }
     }
+}
+
+// 停止当前前台 AI 调用，不选中文字，也不影响其他功能。
+function stopAiReply() {
+    // 回复已经收完、正在逐条显示：让显示循环停下，剩余消息丢弃
+    if (aiDisplayingReply) {
+        aiStopGeneration++;
+        aiDisplayingReply = false;
+        showToast('已停止，剩余消息不再显示');
+        return true;
+    }
+    if (activeAiAbortController) {
+        activeAiAbortController.abort();
+        return true;
+    }
+    if (isGenerating) {
+        isGenerating = false;
+        if (typeof getReplyBtn !== 'undefined' && getReplyBtn) getReplyBtn.disabled = false;
+        if (typeof regenerateBtn !== 'undefined' && regenerateBtn) regenerateBtn.disabled = false;
+        if (typeof typingIndicator !== 'undefined' && typingIndicator) typingIndicator.style.display = 'none';
+        showToast('已停止本次回复调用');
+        return true;
+    }
+    showToast('当前没有正在进行的回复调用');
+    return false;
 }
 
 async function processStream(response, chat, apiType, targetChatId, targetChatType, isBackground = false) {
@@ -600,8 +748,62 @@ async function processStream(response, chat, apiType, targetChatId, targetChatTy
     await handleAiReplyContent(fullResponse, chat, targetChatId, targetChatType, isBackground);
 }
 
+// 引用消息：在最近的聊天记录里找被引用的那条原消息。
+function findQuotedOriginalMessage(chat, quotedText) {
+    const quoted = String(quotedText || '').trim();
+    if (!quoted || !chat || !Array.isArray(chat.history)) return null;
+    const norm = (s) => String(s || '').replace(/\s+/g, '').replace(/[，。！？、；：,.!?;:~～…“”"'’‘「」『』（）()\[\]【】—\-]/g, '').toLowerCase();
+    const textOf = (m) => {
+        let t = String(m.content || '');
+        const wrapped = t.match(/^\[.*?(?:的消息|：)[：:]?([\s\S]*)\]$/);
+        const inner = t.match(/\[.*?的消息：([\s\S]+?)\]/);
+        if (inner) t = inner[1];
+        else if (wrapped && wrapped[1]) t = wrapped[1];
+        return t.replace(/\[发送时间:.*?\]$/, '').trim();
+    };
+    const recent = chat.history.filter(m => !m.isThinking && m.role !== 'system').slice(-60).reverse();
+    const users = recent.filter(m => m.role === 'user');
+    const assistants = recent.filter(m => m.role === 'assistant');
+    const nq = norm(quoted);
+
+    for (const pool of [users, assistants]) {
+        // 1 精确
+        let hit = pool.find(m => textOf(m) === quoted);
+        if (hit) return hit;
+        // 2 去掉标点空白后相等
+        hit = pool.find(m => nq && norm(textOf(m)) === nq);
+        if (hit) return hit;
+        // 3 互相包含
+        if (nq.length >= 2) {
+            hit = pool.find(m => { const nt = norm(textOf(m)); return nt && (nt.includes(nq) || (nt.length >= 4 && nq.includes(nt))); });
+            if (hit) return hit;
+        }
+    }
+    // 4 字符重合度（简繁体混用时多数字符仍相同）
+    if (nq.length >= 4) {
+        let best = null, bestScore = 0.7;
+        for (const m of [...users, ...assistants]) {
+            const nt = norm(textOf(m));
+            if (!nt) continue;
+            const pool = nt.split('');
+            let matched = 0;
+            for (const ch of nq) {
+                const i = pool.indexOf(ch);
+                if (i !== -1) { matched++; pool.splice(i, 1); }
+            }
+            const score = matched / Math.max(nq.length, 1);
+            if (score >= bestScore && matched / Math.max(nt.length, 1) >= 0.4) { best = m; bestScore = score; }
+        }
+        if (best) return best;
+    }
+    return null;
+}
+
 async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChatType, isBackground = false) {
     const rawResponse = fullResponse;
+    if (fullResponse && targetChatType === 'private' && typeof markUserMomentsSeen === 'function') {
+        try { markUserMomentsSeen(chat, (window.__aiReqStart || {})[targetChatId]); } catch (e) { console.warn(e); }
+    }
     if (fullResponse) {
         // 1. 移除 [incipere] 标签
         fullResponse = fullResponse.replace(/\[incipere\]/g, "");
@@ -653,9 +855,10 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
         const momentPostWithImageRegex = /\[(.*?)\s*发布了一条带图动态[：:](.*?)\|([\s\S]+?)\]/;
         const momentPostRegex = /\[(.*?)\s*发布了一条动态[：:]([\s\S]+?)\]/;
         const momentCommentRegex = /\[(.*?)\s*(?:评论了|回复了)\s*(.*?)(?:(?:的|在)动态["“'‘](.*?)["”'’])?(?:下的评论)?[：:]\s*([\s\S]+?)\]/;
+        const momentLikeRegex = /^\[(.*?)\s*点赞了\s*(.*?)的动态(?:[：:]|["“'‘])\s*([\s\S]*?)["”'’]?\s*\]$/;
         const momentSignatureRegex = /\[(.*?)\s*更新了个性签名[：:]([\s\S]+?)\]/;
 
-        let momentPostWithImageMatch, momentPostMatch, momentCommentMatch, momentSignatureMatch;
+        let momentPostWithImageMatch, momentPostMatch, momentCommentMatch, momentSignatureMatch, momentLikeMatch;
         
         let messagesToProcess = getMixedContent(fullResponse).filter(item => item.content.trim() !== '');
         let remainingMessages = [];
@@ -666,8 +869,10 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
             momentPostMatch = content.match(momentPostRegex);
             momentCommentMatch = content.match(momentCommentRegex);
             momentSignatureMatch = content.match(momentSignatureRegex);
+            momentLikeMatch = (momentCommentMatch || momentPostMatch || momentPostWithImageMatch) ? null : content.match(momentLikeRegex);
 
             let isMomentAction = false;
+            let momentCmdContent = content;
 
             if (momentPostWithImageMatch) {
                 isMomentAction = true;
@@ -721,6 +926,38 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 chat.history.push(notificationMsg);
                 addMessageBubble(notificationMsg, targetChatId, targetChatType);
             } 
+            else if (momentLikeMatch) {
+                isMomentAction = true;
+                const liker = momentLikeMatch[1].trim() || chat.realName;
+                const likedOn = momentLikeMatch[2].trim();
+                const likeSnippet = (momentLikeMatch[3] || '').replace(/\.{2,}$|…+$/, '').trim();
+                momentCmdContent = `[${liker}点赞了${likedOn}的动态：${likeSnippet || '…'}]`; // 统一成带冒号的格式，确保聊天里隐藏
+                if (chat.moments && chat.moments.length > 0) {
+                    const myNames = [chat.myName, '我', '你', '{{user}}'].filter(Boolean);
+                    const targetIsMe = myNames.includes(likedOn);
+                    const sorted = [...chat.moments].sort((a, b) => b.timestamp - a.timestamp);
+                    let targetMoment = likeSnippet ? chat.moments.find(m => String(m.content || '').replace(/\s+/g, ' ').includes(likeSnippet)) : null;
+                    if (!targetMoment) targetMoment = (targetIsMe ? sorted.find(m => m.isUser) : sorted.find(m => !m.isUser)) || null;
+                    if (targetMoment) {
+                        if (!targetMoment.likes) targetMoment.likes = [];
+                        if (!targetMoment.likes.includes(liker)) {
+                            targetMoment.likes.push(liker);
+                            if (targetMoment.isUser) {
+                                const likeNotice = {
+                                    id: `msg_${Date.now()}_${Math.random()}`,
+                                    role: 'system',
+                                    content: `[system-display:${liker}赞了您的动态]`,
+                                    timestamp: Date.now(),
+                                    isContextDisabled: true
+                                };
+                                chat.history.push(likeNotice);
+                                addMessageBubble(likeNotice, targetChatId, targetChatType);
+                            }
+                            if (document.getElementById('moments-screen').classList.contains('active')) renderMomentsScreen();
+                        }
+                    }
+                }
+            }
             else if (momentCommentMatch) {
                 isMomentAction = true;
                 const commenter = momentCommentMatch[1].trim();
@@ -729,12 +966,20 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 const commentContent = momentCommentMatch[4].trim();
 
                 if (chat.moments && chat.moments.length > 0) {
+                    const isReplyToComment = content.includes('回复了') && content.includes('下的评论');
+                    // 被评论的是用户自己（我 / 你 / 用户名）吗？
+                    const myNames = [chat.myName, '我', '你', '{{user}}'].filter(Boolean);
+                    const targetIsMe = myNames.includes(commentedOn);
                     let targetMoment = null;
                     if (momentSnippet) {
                         targetMoment = chat.moments.find(m => m.content.includes(momentSnippet));
                     }
                     if (!targetMoment) {
-                        targetMoment = chat.moments.sort((a, b) => b.timestamp - a.timestamp)[0];
+                        // 没有匹配到缩略内容：优先找被评论者本人最新的一条动态
+                        const sorted = [...chat.moments].sort((a, b) => b.timestamp - a.timestamp);
+                        targetMoment = (!isReplyToComment && targetIsMe ? sorted.find(m => m.isUser) : null)
+                            || (!isReplyToComment && !targetIsMe ? sorted.find(m => !m.isUser) : null)
+                            || sorted[0];
                     }
 
                     if (targetMoment) {
@@ -745,16 +990,27 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                             content: commentContent,
                             timestamp: Date.now()
                         };
-                        const isReplyToComment = content.includes('回复了') && content.includes('下的评论');
-                        if (isReplyToComment || (commentedOn !== chat.realName && commentedOn !== '自己')) {
-                             newComment.replyTo = commentedOn;
+                        if (targetMoment.isUser) {
+                            // 评论用户自己的动态：直接评论显示「名字: 内容」，只有回复某条评论时才显示「A 回复 B」。
+                            if (isReplyToComment) newComment.replyTo = commentedOn;
+                        } else if (isReplyToComment || (commentedOn !== chat.realName && commentedOn !== '自己')) {
+                            newComment.replyTo = commentedOn;
                         }
                         targetMoment.comments.push(newComment);
-                        if (commentedOn === chat.myName || commentedOn === '你') {
+
+                        let notifyText = null;
+                        if (targetMoment.isUser) {
+                            notifyText = isReplyToComment
+                                ? `[system-display:${commenter}回复了您的评论]`
+                                : `[system-display:${commenter}评论了您的动态]`;
+                        } else if (commentedOn === chat.myName || commentedOn === '你') {
+                            notifyText = `[system-display:您在${chat.realName}的动态下的评论被回复了]`;
+                        }
+                        if (notifyText) {
                             const notificationMsg = {
                                 id: `msg_${Date.now()}_${Math.random()}`,
                                 role: 'system',
-                                content: `[system-display:您在${chat.realName}的动态下的评论被回复了]`,
+                                content: notifyText,
                                 timestamp: Date.now(),
                                 isContextDisabled: true
                             };
@@ -778,7 +1034,7 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 const originalCmdMsg = {
                     id: `msg_${Date.now()}_${Math.random()}`,
                     role: 'assistant',
-                    content: content,
+                    content: momentCmdContent,
                     timestamp: Date.now(),
                     isContextDisabled: false
                 };
@@ -809,7 +1065,7 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
         }
         // ... 后续代码保持不变 ...
         console.log('【AI原始返回内容】:', rawResponse);
-        let cleanedResponse = fullResponse.replace(/^\[system:.*?\]\s*/, '').replace(/^\(时间:.*?\)\s*/, '');
+        let cleanedResponse = fullResponse.replace(/^\[system:[\s\S]*?\]\s*/, '').replace(/^\(时间:.*?\)\s*/, '');
         const trimmedResponse = cleanedResponse.trim();
         let messages;
 
@@ -820,8 +1076,12 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
         }
 
         let firstMessageProcessed = false;
+        const stopGenAtStart = aiStopGeneration;
+        if (!isBackground) aiDisplayingReply = true;
 
         for (const item of messages) {
+            // 点了暂停：剩下的消息不再显示
+            if (!isBackground && aiStopGeneration !== stopGenAtStart) break;
             // 自动剔除不存在的表情包
             const stickerRegex = /\[(?:.*?的)?表情包：(.+?)\]/i;
             const stickerMatch = item.content.match(stickerRegex);
@@ -882,6 +1142,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 };
                 chat.history.push(message);
                 addMessageBubble(message, targetChatId, targetChatType);
+                if (window.SystemNotificationManager) {
+                    window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                }
                 continue; // 跳过后续处理
             }
 
@@ -949,6 +1212,8 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
             if (!isBackground) {
                 const delay = firstMessageProcessed ? (900 + Math.random() * 1300) : (400 + Math.random() * 400);
                 await new Promise(resolve => setTimeout(resolve, delay));
+                // 等待期间点了暂停：这一条也不显示了
+                if (aiStopGeneration !== stopGenAtStart) break;
                 
                 // 如果开启了多条消息提示音，且不是第一条消息（第一条已由系统默认逻辑播放），则播放提示音
                 if (firstMessageProcessed && db.multiMsgSoundEnabled && db.globalReceiveSound) {
@@ -956,6 +1221,135 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 }
             }
             firstMessageProcessed = true;
+
+            // --- 问卷（仅私聊）：发起 / 回答 ---
+            if (targetChatType === 'private' && typeof createQnObject === 'function') {
+                const aiQnStart = parseAiQnStart(item.content);
+                if (aiQnStart) {
+                    const qn = createQnObject('char', aiQnStart.title, aiQnStart.questions, aiQnStart.mode);
+                    if (qn.title && qn.questions.length >= 1) {
+                        const qnContent = `[${aiQnStart.name}发起了${qn.mode === 'one' ? '单向' : '双向'}问卷：${qn.title}|${qn.questions.map(x => x.text).join('|')}]`;
+                        const qnMessage = {
+                            id: `msg_${Date.now()}_${Math.random()}`,
+                            role: 'assistant',
+                            content: qnContent,
+                            parts: [{type: 'text', text: qnContent}],
+                            timestamp: Date.now(),
+                            qn
+                        };
+                        chat.history.push(qnMessage);
+                        addMessageBubble(qnMessage, targetChatId, targetChatType);
+                    }
+                    continue;
+                }
+                const aiQnAns = parseAiQnAnswer(item.content);
+                if (aiQnAns) {
+                    const qnMsg = findQnMessage(chat, aiQnAns.title, 'char');
+                    if (qnMsg && qnNeeds(qnMsg.qn, 'char') && !qnMsg.qn.submitted.char) {
+                        applyAiQnAnswers(qnMsg, aiQnAns.answers);
+                        // 内容里保留答案（AI 自己的上下文要用），聊天里只显示“已回答”一行小字
+                        const ansContent = `[${aiQnAns.name}回答了问卷“${qnMsg.qn.title}”：${qnMsg.qn.questions.map(x => x.char || '（未回答）').join('|')}]`;
+                        const ansMessage = {
+                            id: `msg_${Date.now()}_${Math.random()}`,
+                            role: 'assistant',
+                            content: ansContent,
+                            parts: [{type: 'text', text: ansContent}],
+                            timestamp: Date.now()
+                        };
+                        chat.history.push(ansMessage);
+                        addMessageBubble(ansMessage, targetChatId, targetChatType);
+                        qnMaybeReveal(chat, qnMsg);
+                        if (currentChatId === targetChatId) refreshQnCard(qnMsg.id);
+                    } else {
+                        console.warn('[Questionnaire] 找不到待回答的问卷，或已回答过:', item.content);
+                    }
+                    continue;
+                }
+            }
+
+            // --- 投票（仅私聊）：发起 / 选择 / 添加选项 ---
+            if (targetChatType === 'private' && typeof createVoteObject === 'function') {
+                const aiVoteStart = item.content.trim().match(/^\[([^\[\]：:]{1,40}?)[发發]起了?投票[：:]\s*([^\[\]]+?)\s*\]$/);
+                if (aiVoteStart) {
+                    const parts = aiVoteStart[2].split(/[|｜]/).map(s => s.trim()).filter(Boolean);
+                    const vote = createVoteObject('char', parts[0] || '', parts.slice(1));
+                    if (vote.title && vote.options.length >= 2) {
+                        const voteContent = `[${aiVoteStart[1]}发起了投票：${vote.title}|${vote.options.map(o => o.text).join('|')}]`;
+                        const voteMessage = {
+                            id: `msg_${Date.now()}_${Math.random()}`,
+                            role: 'assistant',
+                            content: voteContent,
+                            parts: [{type: 'text', text: voteContent}],
+                            timestamp: Date.now(),
+                            vote
+                        };
+                        chat.history.push(voteMessage);
+                        addMessageBubble(voteMessage, targetChatId, targetChatType);
+                    }
+                    continue;
+                }
+                const aiVoteAct = parseAiVoteAction(item.content);
+                if (aiVoteAct) {
+                    const pollMsg = findVoteMessage(chat, aiVoteAct.title);
+                    if (pollMsg) {
+                        const doneTexts = [];
+                        if (aiVoteAct.kind === 'choose') {
+                            const opt = findVoteOption(pollMsg.vote, aiVoteAct.text);
+                            if (opt) { setVoteChoice(pollMsg.vote, 'char', opt.id); doneTexts.push(opt.text); }
+                        } else {
+                            // 一次可能写了多个选项（用顿号/逗号/竖线隔开）
+                            splitVoteOptionTexts(aiVoteAct.text).forEach(t => {
+                                const res = addVoteOption(pollMsg.vote, 'char', t);
+                                if (res.ok) doneTexts.push(res.option.text);
+                            });
+                        }
+                        if (doneTexts.length > 0) {
+                            const verb = aiVoteAct.kind === 'choose' ? '选择了' : '添加了选项';
+                            const actContent = `[${aiVoteAct.name}在投票“${pollMsg.vote.title}”中${verb}：${doneTexts.join('、')}]`;
+                            const actMessage = {
+                                id: `msg_${Date.now()}_${Math.random()}`,
+                                role: 'assistant',
+                                content: actContent,
+                                parts: [{type: 'text', text: actContent}],
+                                timestamp: Date.now()
+                            };
+                            chat.history.push(actMessage);
+                            addMessageBubble(actMessage, targetChatId, targetChatType);
+                            if (currentChatId === targetChatId) refreshVoteCard(pollMsg.id);
+                        } else {
+                            console.warn('[Vote] AI 的投票动作没有生效（选项不存在/已存在/已满）:', item.content);
+                        }
+                    } else {
+                        console.warn('[Vote] 找不到可操作的投票:', item.content);
+                    }
+                    continue;
+                }
+            }
+
+            // --- 拍一拍 / 修改拍一拍后缀（仅私聊） ---
+            if (targetChatType === 'private') {
+                const patSuffixCmd = item.content.match(/\[[^\[\]]*?更新了?拍一拍后缀为[：:]\s*([^\[\]]*?)\s*\]/);
+                if (patSuffixCmd && chat.patEnabled && chat.patAiSuffix) {
+                    chat.patCharSuffix = patSuffixCmd[1].trim().slice(0, 20);
+                }
+                const aiPatMatch = item.content.trim().match(/^\[([^\[\]：:]{1,40}?)拍了拍([^\[\]：:]{1,40}?)(?:[：:]([^\[\]]{0,30}))?\]$/);
+                if (aiPatMatch) {
+                    if (!chat.patEnabled) continue; // 没开拍一拍：丢掉
+                    // 后缀以用户设置的“我的后缀”为准，AI 自己写的会被忽略
+                    const mySuffix = chat.patMySuffix || '';
+                    const patContent = `[${aiPatMatch[1]}拍了拍${aiPatMatch[2]}${mySuffix ? '：' + mySuffix : ''}]`;
+                    const patMessage = {
+                        id: `msg_${Date.now()}_${Math.random()}`,
+                        role: 'assistant',
+                        content: patContent,
+                        parts: [{type: 'text', text: patContent}],
+                        timestamp: Date.now()
+                    };
+                    chat.history.push(patMessage);
+                    addMessageBubble(patMessage, targetChatId, targetChatType);
+                    continue;
+                }
+            }
 
             const aiWithdrawRegex = /\[(.*?)撤回了一条消息：([\s\S]*?)\]/;
             const aiWithdrawRegexEn = /\[(?:system:\s*)?(.*?) withdrew a message\. Original: ([\s\S]*?)\]/;
@@ -1019,6 +1413,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
 
                 chat.history.push(message);
                 addMessageBubble(message, targetChatId, targetChatType);
+                if (window.SystemNotificationManager) {
+                    window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                }
                 
                 setTimeout(async () => {
                     message.isWithdrawn = true;
@@ -1039,23 +1436,19 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                 const character = chat;
                 const myName = character.myName;
 
-                const aiQuoteRegex = new RegExp(`\\[${character.realName}引用[“"](.*?)["”]并回复：([\\s\\S]*?)\\]`);
+                // 兼容简/繁体写法（并/並、回复/回覆/回復）、冒号和引号的变体，名字不强求和设定完全一致。
+                const aiQuoteRegex = /\[[^\[\]：:]*?引用\s*[“"「『]([\s\S]*?)[”"」』]\s*[并並]?\s*(?:回复|回覆|回復)\s*[：:]\s*([\s\S]*?)\]/;
                 const aiQuoteMatch = item.content.match(aiQuoteRegex);
 
                 if (aiQuoteMatch) {
                     const quotedText = aiQuoteMatch[1];
                     const replyText = aiQuoteMatch[2];
 
-                    const originalMessage = chat.history.slice().reverse().find(m => {
-                        if (m.role === 'user') {
-                            const userMessageMatch = m.content.match(/\[.*?的消息：([\s\S]+?)\]/);
-                            const userMessageText = userMessageMatch ? userMessageMatch[1] : m.content;
-                            return userMessageText.trim() === quotedText.trim();
-                        }
-                        return false;
-                    });
+                    // 找被引用的原消息：先精确匹配，再宽松匹配（模型常常改动标点、简繁体或只引用一部分）。
+                    const originalMessage = findQuotedOriginalMessage(chat, quotedText);
 
-                    if (originalMessage) {
+                    // 找不到原消息也照样显示引用样式，只是不关联到具体某条消息。
+                    {
                         const message = {
                             id: `msg_${Date.now()}_${Math.random()}`,
                             role: 'assistant',
@@ -1065,25 +1458,16 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                             isStatusUpdate: item.isStatusUpdate,
                             statusSnapshot: item.statusSnapshot,
                             quote: {
-                                messageId: originalMessage.id,
-                                senderId: 'user_me',
+                                messageId: originalMessage ? originalMessage.id : null,
+                                senderId: (originalMessage && originalMessage.role === 'assistant') ? character.id : 'user_me',
                                 content: quotedText
                             }
                         };
                         chat.history.push(message);
                         addMessageBubble(message, targetChatId, targetChatType);
-                    } else {
-                        const message = {
-                            id: `msg_${Date.now()}_${Math.random()}`,
-                            role: 'assistant',
-                            content: `[${character.realName}的消息：${replyText}]`,
-                            parts: [{ type: 'text', text: `[${character.realName}的消息：${replyText}]` }],
-                            timestamp: Date.now(),
-                            isStatusUpdate: item.isStatusUpdate,
-                            statusSnapshot: item.statusSnapshot
-                        };
-                        chat.history.push(message);
-                        addMessageBubble(message, targetChatId, targetChatType);
+                        if (window.SystemNotificationManager) {
+                            window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                        }
                     }
                 } else {
                     const receivedTransferRegex = new RegExp(`\\[${character.realName}的转账：.*?元；备注：.*?\\]`);
@@ -1107,6 +1491,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
 
                     chat.history.push(message);
                     addMessageBubble(message, targetChatId, targetChatType);
+                if (window.SystemNotificationManager) {
+                    window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                }
                 }
 
             } else if (targetChatType === 'group') {
@@ -1146,6 +1533,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                     };
                     group.history.push(message);
                     addMessageBubble(message, targetChatId, targetChatType);
+                if (window.SystemNotificationManager) {
+                    window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                }
                     continue; // 私聊消息处理完毕，跳过后续普通消息匹配
                 }
 
@@ -1170,6 +1560,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                         };
                         group.history.push(message);
                         addMessageBubble(message, targetChatId, targetChatType);
+                        if (window.SystemNotificationManager) {
+                            window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                        }
                     }
                 } else if (nameMatch || item.char) {
                     const senderName = item.char || (nameMatch[1]);
@@ -1186,6 +1579,9 @@ async function handleAiReplyContent(fullResponse, chat, targetChatId, targetChat
                         };
                         group.history.push(message);
                         addMessageBubble(message, targetChatId, targetChatType);
+                        if (window.SystemNotificationManager) {
+                            window.SystemNotificationManager.notifyIncomingMessage(message, chat, targetChatId, targetChatType);
+                        }
                     }
                 }
             }

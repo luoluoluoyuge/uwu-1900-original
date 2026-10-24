@@ -112,6 +112,7 @@ const groupSettingsHtml = `
                             <div class="kkt-item-control">
                                 <select id="setting-group-bilingual-style" style="border:none; background:transparent; text-align:right;">
                                     <option value="under">气泡外 (默认)</option>
+                                    <option value="under-auto">气泡外 (自动显示)</option>
                                     <option value="inner">气泡内</option>
                                     <option value="inner-no-line">气泡内 (无分割线)</option>
                                 </select>

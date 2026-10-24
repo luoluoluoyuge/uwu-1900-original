@@ -25,6 +25,8 @@ async function setupStickerSystem() {
     const batchAddStickerForm = document.getElementById('batch-add-sticker-form');
     const stickerUrlsTextarea = document.getElementById('sticker-urls-textarea');
     const batchStickerGroupInput = document.getElementById('batch-sticker-group');
+    const stickerBatchFileInput = document.getElementById('sticker-batch-file');
+    const exportStickerTxtBtn = document.getElementById('export-sticker-txt-btn');
     const addStickerModal = document.getElementById('add-sticker-modal');
     const addStickerForm = document.getElementById('add-sticker-form');
     const stickerNameInput = document.getElementById('sticker-name');
@@ -172,6 +174,55 @@ async function setupStickerSystem() {
         }
     });
 
+    // 管理模式下长按分组名称可直接重命名。
+    let categoryLongPressTimer = null;
+    let categoryLongPressTriggered = false;
+    const startCategoryLongPress = (e) => {
+        const item = e.target.closest('.sticker-category-item');
+        if (!item || !isStickerManageMode) return;
+        const category = item.dataset.category;
+        if (['recent', 'all', 'ungrouped'].includes(category)) return;
+
+        categoryLongPressTriggered = false;
+        clearTimeout(categoryLongPressTimer);
+        categoryLongPressTimer = setTimeout(async () => {
+            categoryLongPressTriggered = true;
+            const oldName = category;
+            const newName = prompt('修改分组名称', oldName);
+            if (newName === null) return;
+            const trimmedName = newName.trim();
+            if (!trimmedName || trimmedName === oldName) return;
+            if (db.myStickers.some(s => s.group === trimmedName)) {
+                showToast('该分组名称已存在');
+                return;
+            }
+
+            db.myStickers.forEach(sticker => {
+                if (sticker.group === oldName) sticker.group = trimmedName;
+            });
+            if (currentStickerCategory === oldName) currentStickerCategory = trimmedName;
+            await saveData();
+            renderStickerCategories();
+            renderStickerGrid();
+            showToast('分组名称已修改');
+        }, 600);
+    };
+    const cancelCategoryLongPress = () => {
+        clearTimeout(categoryLongPressTimer);
+        categoryLongPressTimer = null;
+    };
+    stickerCategoryBar.addEventListener('pointerdown', startCategoryLongPress);
+    stickerCategoryBar.addEventListener('pointerup', cancelCategoryLongPress);
+    stickerCategoryBar.addEventListener('pointerleave', cancelCategoryLongPress);
+    stickerCategoryBar.addEventListener('pointercancel', cancelCategoryLongPress);
+    stickerCategoryBar.addEventListener('click', (e) => {
+        if (categoryLongPressTriggered) {
+            categoryLongPressTriggered = false;
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, true);
+
     batchAddStickerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const textInput = stickerUrlsTextarea.value.trim();
@@ -251,7 +302,106 @@ async function setupStickerSystem() {
         }
     });
 
+    // 从 TXT / Word 批量导入：读取文件内容，整理成“名称:URL”逐行格式，
+    // 并自动使用文件名作为本批次分组名称。
+    if (stickerBatchFileInput) {
+        stickerBatchFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            try {
+                let rawText = '';
+                if (/\.docx$/i.test(file.name)) {
+                    if (typeof mammoth === 'undefined') {
+                        throw new Error('Word 解析库未加载');
+                    }
+                    const buffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                    rawText = result.value || '';
+                } else {
+                    rawText = await file.text();
+                }
+
+                const normalizedLines = rawText
+                    .replace(/\r\n?/g, '\n')
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean)
+                    .map(line => {
+                        const colonIndex = line.indexOf(':') >= 0 ? line.indexOf(':') : line.indexOf('：');
+                        if (colonIndex <= 0) return null;
+                        const name = line.substring(0, colonIndex).trim();
+                        const url = line.substring(colonIndex + 1).trim();
+                        if (!name || !/^https?:\/\//i.test(url)) return null;
+                        return `${name}:${url}`;
+                    })
+                    .filter(Boolean);
+
+                stickerUrlsTextarea.value = normalizedLines.join('\n');
+                const groupName = file.name.replace(/\.(txt|docx)$/i, '').trim();
+                batchStickerGroupInput.value = groupName;
+
+                if (!normalizedLines.length) {
+                    showToast('文件中没有找到有效的“名称:URL”数据');
+                } else {
+                    showToast(`已读取 ${normalizedLines.length} 条表情数据`);
+                }
+            } catch (error) {
+                console.error('批量导入文件失败:', error);
+                showToast('文件读取失败，请使用 TXT 或 DOCX 文件');
+            } finally {
+                e.target.value = '';
+            }
+        });
+    }
+
+    // 导出当前管理分组为 TXT，仅保留“描述:URL”。
+    if (exportStickerTxtBtn) {
+        exportStickerTxtBtn.addEventListener('click', () => {
+            let stickers = [];
+            let fileName = '表情包';
+
+            if (currentStickerCategory === 'recent') {
+                stickers = [...db.myStickers]
+                    .sort((a, b) => (b.lastUsedTime || 0) - (a.lastUsedTime || 0))
+                    .slice(0, 20);
+                fileName = '最近使用表情包';
+            } else if (currentStickerCategory === 'all') {
+                stickers = [...db.myStickers];
+                fileName = '全部表情包';
+            } else if (currentStickerCategory === 'ungrouped') {
+                stickers = db.myStickers.filter(s => !s.group);
+                fileName = '未分类表情包';
+            } else {
+                stickers = db.myStickers.filter(s => s.group === currentStickerCategory);
+                fileName = currentStickerCategory || '表情包';
+            }
+
+            const lines = stickers
+                .filter(s => s && s.name && s.data)
+                .map(s => `${s.name}:${s.data}`);
+
+            if (!lines.length) {
+                showToast('当前分组没有可导出的表情');
+                return;
+            }
+
+            const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`已导出 ${lines.length} 个表情`);
+        });
+    }
+
     const stickerToggleBtn = document.getElementById('sticker-toggle-btn');
+    setupStickerMatchInput();
+
     stickerToggleBtn.addEventListener('click', (e) => {
         e.preventDefault();
         const msgInput = document.getElementById('message-input');
@@ -271,6 +421,102 @@ async function setupStickerSystem() {
             }
         }
     });
+}
+
+function setupStickerMatchInput() {
+    const input = document.getElementById('message-input');
+    const popup = document.getElementById('sticker-match-popup');
+    const list = document.getElementById('sticker-match-list');
+    if (!input || !popup || !list) return;
+
+    const normalize = (value) => String(value || '')
+        .toLowerCase()
+        .replace(/[\s\u3000]+/g, '')
+        .replace(/[「」『』【】\[\]()（）{}]/g, '');
+
+    const hide = () => {
+        popup.classList.remove('visible');
+        popup.setAttribute('aria-hidden', 'true');
+    };
+
+    const getCurrentChat = () => {
+        if (!currentChatId) return null;
+        return currentChatType === 'private'
+            ? db.characters.find(c => c.id === currentChatId)
+            : db.groups.find(g => g.id === currentChatId);
+    };
+
+    const renderMatches = () => {
+        const chat = getCurrentChat();
+        if (!chat || !chat.stickerMatchEnabled) {
+            hide();
+            return;
+        }
+
+        const raw = input.value.trim();
+        const query = normalize(raw);
+        if (!query || !Array.isArray(db.myStickers) || db.myStickers.length === 0) {
+            hide();
+            return;
+        }
+
+        const matches = db.myStickers
+            .map(sticker => {
+                const name = normalize(sticker.name);
+                if (!name) return null;
+                let score = 0;
+                if (name === query) score = 100;
+                else if (name.startsWith(query)) score = 80;
+                else if (name.includes(query)) score = 60;
+                else if (query.includes(name)) score = 50;
+                else return null;
+                return { sticker, score };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score || String(a.sticker.name).localeCompare(String(b.sticker.name), 'zh-CN'))
+            .slice(0, 8)
+            .map(item => item.sticker);
+
+        if (!matches.length) {
+            hide();
+            return;
+        }
+
+        list.innerHTML = '';
+        matches.forEach(sticker => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'sticker-match-item';
+            item.innerHTML = `<img src="${sticker.data}" alt=""><span>${sticker.name}</span>`;
+            item.addEventListener('mousedown', (e) => e.preventDefault());
+            item.addEventListener('click', async () => {
+                await sendSticker(sticker);
+                input.value = '';
+                hide();
+            });
+            list.appendChild(item);
+        });
+
+        // 这里调节的是弹窗的上下位置，不是弹窗本身的大小。
+        // 正数向上移动，负数向下移动；默认值为 0。
+        const positionSource = document.getElementById('setting-sticker-match-position');
+        const position = Math.min(220, Math.max(-100, parseInt(positionSource?.value, 10) || parseInt(chat.stickerMatchPosition, 10) || 0));
+        popup.style.bottom = `calc(100% + ${position}px)`;
+        popup.classList.add('visible');
+        popup.setAttribute('aria-hidden', 'false');
+    };
+
+    input.addEventListener('input', renderMatches);
+    input.addEventListener('focus', () => {
+        if (input.value.trim()) renderMatches();
+    });
+    input.addEventListener('blur', () => {
+        setTimeout(hide, 160);
+    });
+
+    // 切换聊天后，输入框内容或设置可能发生变化。
+    document.addEventListener('chat-screen-updated', renderMatches);
+    window.refreshStickerMatchPopup = renderMatches;
 }
 
 function renderStickerCategories() {

@@ -1,33 +1,330 @@
 // --- 个性化与外观设置逻辑 ---
 
+const DEFAULT_WALLPAPER_URL = 'https://i.postimg.cc/W4Z9R9x4/ins-1.jpg';
+
 function setupWallpaperApp() {
     const e = document.getElementById('wallpaper-upload'), t = document.getElementById('wallpaper-preview');
+    const urlInput = document.getElementById('wallpaper-url-input');
+    const urlBtn = document.getElementById('wallpaper-url-apply-btn');
+    const urlOpenBtn = document.getElementById('wallpaper-url-open-btn');
+    const urlCancelBtn = document.getElementById('wallpaper-url-cancel-btn');
+    const urlModal = document.getElementById('wallpaper-url-modal');
+    const resetBtn = document.getElementById('wallpaper-reset-btn');
     if (t) {
-        t.style.backgroundImage = `url(${db.wallpaper})`;
+        t.style.backgroundImage = `url("${db.wallpaper}")`;
         t.textContent = '';
     }
+    const commitWallpaper = async (url, message) => {
+        db.wallpaper = url;
+        applyWallpaper(url);
+        if (t) t.style.backgroundImage = `url("${url}")`;
+        await saveData();
+        showToast(message);
+    };
     if (e) {
         e.addEventListener('change', async (a) => {
             const n = a.target.files[0];
             if (n) {
                 try {
                     const r = await compressImage(n, {quality: 0.85, maxWidth: 1080, maxHeight: 1920});
-                    db.wallpaper = r;
-                    applyWallpaper(r);
-                    if (t) t.style.backgroundImage = `url(${r})`;
-                    await saveData();
-                    showToast('壁纸已更新');
+                    await commitWallpaper(r, '壁纸已更新');
                 } catch (error) {
                     showToast('壁纸压缩失败');
                 }
             }
         });
     }
+    // 通过图片链接设置壁纸：先确认图片能加载，再应用，避免主屏幕变成空白。
+    if (urlOpenBtn && urlModal && urlInput) {
+        urlOpenBtn.addEventListener('click', () => {
+            urlModal.classList.add('visible');
+            setTimeout(() => urlInput.focus(), 50);
+        });
+        urlCancelBtn?.addEventListener('click', () => urlModal.classList.remove('visible'));
+        urlModal.addEventListener('click', (ev) => { if (ev.target === urlModal) urlModal.classList.remove('visible'); });
+    }
+    if (urlBtn && urlInput) {
+        urlBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url) return showToast('请先输入图片链接');
+            if (!/^(https?:\/\/|data:image\/)/i.test(url)) return showToast('链接需以 http:// 或 https:// 开头');
+            urlBtn.disabled = true;
+            try {
+                await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = resolve;
+                    img.onerror = () => reject(new Error('load'));
+                    img.src = url;
+                });
+                await commitWallpaper(url, '壁纸已更新');
+                urlInput.value = '';
+                urlModal?.classList.remove('visible');
+            } catch (error) {
+                showToast('图片加载失败，请检查链接是否有效');
+            } finally {
+                urlBtn.disabled = false;
+            }
+        });
+    }
+    if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+            if (!confirm('确定要恢复默认壁纸吗？')) return;
+            await commitWallpaper(DEFAULT_WALLPAPER_URL, '已恢复默认壁纸');
+        });
+    }
+}
+
+// ===== 主屏幕预设：保存/切换 壁纸、图标、小组件配置 =====
+const HOME_PRESET_KEYS = [
+    'wallpaper', 'customIcons', 'homeLayoutPages', 'homeLayoutOrder',
+    'addedWidgets', 'widgetTemplates', 'insWidgetSettings', 'homeWidgetSettings', 'homeSignature'
+];
+
+function captureHomeScreenSnapshot() {
+    const data = {};
+    HOME_PRESET_KEYS.forEach(key => {
+        if (db[key] !== undefined) data[key] = JSON.parse(JSON.stringify(db[key]));
+    });
+    return data;
+}
+
+function escapeHtmlText(text) {
+    return String(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function buildHomePresetsHTML() {
+    const presets = Array.isArray(db.homeScreenPresets) ? db.homeScreenPresets : [];
+    const rows = presets.map(preset => `
+        <div class="kkt-item" style="display:block;padding-top:10px;padding-bottom:10px;">
+            <div style="font-size:14px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtmlText(preset.name)}</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;">
+                <button type="button" class="home-preset-apply-btn btn btn-small btn-primary" data-id="${preset.id}" style="font-family:inherit;padding:5px 0;font-size:12px;margin:0;width:100%;white-space:nowrap;">应用</button>
+                <button type="button" class="home-preset-rename-btn btn btn-small btn-neutral" data-id="${preset.id}" style="font-family:inherit;padding:5px 0;font-size:12px;margin:0;width:100%;white-space:nowrap;">改名</button>
+                <button type="button" class="home-preset-update-btn btn btn-small btn-neutral" data-id="${preset.id}" style="font-family:inherit;padding:5px 0;font-size:12px;margin:0;width:100%;white-space:nowrap;">覆盖</button>
+                <button type="button" class="home-preset-export-btn btn btn-small btn-neutral" data-id="${preset.id}" style="font-family:inherit;padding:5px 0;font-size:12px;margin:0;width:100%;white-space:nowrap;">导出</button>
+                <button type="button" class="home-preset-delete-btn btn btn-small" data-id="${preset.id}" style="font-family:inherit;padding:5px 0;font-size:12px;margin:0;width:100%;white-space:nowrap;background-color:#f0f0f0;color:#e5484d;border:none;">删除</button>
+            </div>
+        </div>`).join('');
+    return `
+    <div style="margin-bottom:18px;">
+        <div style="font-size:13px;color:#666;margin-bottom:8px;">主屏幕预设（壁纸、图标、小组件）</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <button type="button" id="home-preset-import-btn" class="btn btn-small btn-neutral" style="font-family:inherit;padding:8px 10px;font-size:13px;margin:0;width:100%;white-space:nowrap;">导入</button>
+            <button type="button" id="home-preset-save-btn" class="btn btn-small btn-primary" style="font-family:inherit;padding:8px 10px;font-size:13px;margin:0;width:100%;white-space:nowrap;">保存当前</button>
+        </div>
+        <input type="file" id="home-preset-import-input" accept=".json,application/json" style="display:none;">
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;color:#999;margin-bottom:8px;line-height:1.5;">
+            <input type="checkbox" id="home-preset-include-widgets" style="margin-top:3px;flex-shrink:0;">
+            <span>导出时包含小组件本体（仅小组件作者本人可勾选；分享他人作品的预设请不要勾选，默认只记录需要哪些小组件）</span>
+        </label>
+        ${rows || '<div style="font-size:12px;color:#999;padding:8px 0;">还没有预设。把当前主屏幕调好后，点「保存当前」即可。</div>'}
+    </div>
+    <div style="font-size:13px;color:#666;margin-bottom:6px;">单个图标</div>`;
+}
+
+async function saveHomeScreenPreset() {
+    const name = (prompt('请输入预设名称（同名将覆盖）:') || '').trim();
+    if (!name) return;
+    if (!Array.isArray(db.homeScreenPresets)) db.homeScreenPresets = [];
+    const existing = db.homeScreenPresets.find(p => p.name === name);
+    if (existing) {
+        if (!confirm(`已有名为「${name}」的预设，要覆盖吗？`)) return;
+        existing.data = captureHomeScreenSnapshot();
+        existing.updatedAt = Date.now();
+    } else {
+        db.homeScreenPresets.push({
+            id: `hsp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+            name, createdAt: Date.now(), data: captureHomeScreenSnapshot()
+        });
+    }
+    await saveData();
+    renderCustomizeForm();
+    showToast('主屏幕预设已保存');
+}
+
+// 预设里用到的小组件清单（只含 id / 名称 / 尺寸，不含小组件代码）
+function getPresetWidgetRefs(data, savedRefs) {
+    const refs = [];
+    const seen = new Set();
+    const instances = Array.isArray(data.addedWidgets) ? data.addedWidgets : [];
+    instances.forEach(inst => {
+        const tid = inst && inst.templateId;
+        if (!tid || seen.has(tid)) return;
+        seen.add(tid);
+        const tpl = (Array.isArray(data.widgetTemplates) ? data.widgetTemplates.find(t => t.id === tid) : null)
+            || (db.widgetTemplates || []).find(t => t.id === tid);
+        const saved = (savedRefs || []).find(r => r.id === tid);
+        refs.push({ id: tid, name: (tpl && tpl.name) || (saved && saved.name) || tid, size: (tpl && tpl.size) || (saved && saved.size) || '' });
+    });
+    return refs;
+}
+
+// 对照本机小组件库：先比 id，再比名称。返回 { remap: {旧id: 本机id}, missing: [ref] }
+function matchPresetWidgets(refs) {
+    const local = db.widgetTemplates || [];
+    const remap = {};
+    const missing = [];
+    refs.forEach(ref => {
+        if (local.some(t => t.id === ref.id)) return;
+        const byName = ref.name ? local.find(t => t.name === ref.name) : null;
+        if (byName) remap[ref.id] = byName.id;
+        else missing.push(ref);
+    });
+    return { remap, missing };
+}
+
+async function applyHomeScreenPreset(id) {
+    const preset = (db.homeScreenPresets || []).find(p => p.id === id);
+    if (!preset) return;
+    if (!confirm(`应用预设「${preset.name}」？当前主屏幕的壁纸、图标和小组件配置将被替换。\n（建议先点「保存当前」备份）`)) return;
+    const refs = getPresetWidgetRefs(preset.data, preset.widgetRefs);
+    // 预设自带小组件本体时（仅自己备份的预设），只补上本机没有的，绝不覆盖/删除本机已有的小组件
+    if (Array.isArray(preset.data.widgetTemplates)) {
+        if (!db.widgetTemplates) db.widgetTemplates = [];
+        preset.data.widgetTemplates.forEach(tpl => {
+            if (tpl && tpl.id && !db.widgetTemplates.some(t => t.id === tpl.id)) {
+                db.widgetTemplates.push(JSON.parse(JSON.stringify(tpl)));
+            }
+        });
+    }
+    const { remap, missing } = matchPresetWidgets(refs);
+    HOME_PRESET_KEYS.forEach(key => {
+        if (key === 'widgetTemplates') return;
+        if (preset.data[key] !== undefined) db[key] = JSON.parse(JSON.stringify(preset.data[key]));
+    });
+    if (Object.keys(remap).length && Array.isArray(db.addedWidgets)) {
+        db.addedWidgets.forEach(inst => { if (remap[inst.templateId]) inst.templateId = remap[inst.templateId]; });
+    }
+    if (!db.customIcons) db.customIcons = {};
+    await saveData();
+    applyWallpaper(db.wallpaper);
+    const wp = document.getElementById('wallpaper-preview');
+    if (wp) wp.style.backgroundImage = `url("${db.wallpaper}")`;
+    setupHomeScreen();
+    renderCustomizeForm();
+    showToast(`已应用预设「${preset.name}」`);
+    if (missing.length) {
+        alert(`这个预设用到了你还没有的小组件：\n${missing.map(m => '· ' + m.name).join('\n')}\n\n对应位置暂时是空的。请到「小组件」App 导入这些小组件，导入后会自动显示在原来的位置。`);
+    }
+}
+
+async function exportHomeScreenPreset(id) {
+    const preset = (db.homeScreenPresets || []).find(p => p.id === id);
+    if (!preset) return;
+    const includeBody = !!document.getElementById('home-preset-include-widgets')?.checked;
+    const data = JSON.parse(JSON.stringify(preset.data));
+    const widgetRefs = getPresetWidgetRefs(preset.data, preset.widgetRefs);
+    if (includeBody) {
+        // 只带上这个预设实际用到的小组件
+        const usedIds = new Set(widgetRefs.map(r => r.id));
+        const pool = Array.isArray(preset.data.widgetTemplates) ? preset.data.widgetTemplates : (db.widgetTemplates || []);
+        data.widgetTemplates = JSON.parse(JSON.stringify(pool.filter(t => usedIds.has(t.id))));
+    } else {
+        delete data.widgetTemplates;
+    }
+    const payload = {
+        type: 'uwu-home-preset', version: 1, exportedAt: Date.now(),
+        presets: [{ name: preset.name, widgetRefs, includesWidgets: includeBody, data }]
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `uwu_home_preset_${preset.name.replace(/[\\/:*?"<>|\s]+/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(includeBody ? '已导出（含小组件本体）' : '已导出（不含小组件本体）');
+}
+
+async function importHomeScreenPresets(file) {
+    let parsed;
+    try { parsed = JSON.parse(await file.text()); } catch (e) { showToast('文件格式不正确'); return; }
+    if (!parsed || parsed.type !== 'uwu-home-preset' || !Array.isArray(parsed.presets)) {
+        showToast('这不是主屏幕预设文件');
+        return;
+    }
+    if (!Array.isArray(db.homeScreenPresets)) db.homeScreenPresets = [];
+    const summary = [];
+    let count = 0;
+    parsed.presets.forEach(item => {
+        if (!item || typeof item.data !== 'object' || item.data === null) return;
+        const data = {};
+        HOME_PRESET_KEYS.forEach(key => { if (item.data[key] !== undefined) data[key] = item.data[key]; });
+        if (data.widgetTemplates !== undefined && !Array.isArray(data.widgetTemplates)) delete data.widgetTemplates;
+        if (data.addedWidgets !== undefined && !Array.isArray(data.addedWidgets)) delete data.addedWidgets;
+        let name = String(item.name || '导入的预设').slice(0, 40);
+        const base = name;
+        let n = 2;
+        while (db.homeScreenPresets.some(p => p.name === name)) name = `${base} (${n++})`;
+        const refs = getPresetWidgetRefs(data, Array.isArray(item.widgetRefs) ? item.widgetRefs : []);
+        db.homeScreenPresets.push({
+            id: `hsp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+            name, createdAt: Date.now(), widgetRefs: refs, data
+        });
+        count++;
+        const bundled = new Set((data.widgetTemplates || []).map(t => t.id));
+        const { remap, missing } = matchPresetWidgets(refs);
+        const lacking = missing.filter(m => !bundled.has(m.id));
+        if (refs.length) {
+            summary.push(`「${name}」需要的小组件：${refs.map(r => r.name).join('、')}` +
+                (lacking.length ? `\n  你还缺：${lacking.map(m => m.name).join('、')}` : '\n  你都有了'));
+        }
+    });
+    if (!count) { showToast('文件里没有可导入的预设'); return; }
+    await saveData();
+    renderCustomizeForm();
+    showToast(`已导入 ${count} 个预设`);
+    if (summary.length) alert(summary.join('\n\n') + '\n\n缺少的小组件请先到「小组件」App 导入，再应用预设。');
+}
+
+async function updateHomeScreenPreset(id) {
+    const preset = (db.homeScreenPresets || []).find(p => p.id === id);
+    if (!preset) return;
+    if (!confirm(`用当前主屏幕覆盖预设「${preset.name}」？`)) return;
+    preset.data = captureHomeScreenSnapshot();
+    preset.updatedAt = Date.now();
+    await saveData();
+    showToast('预设已更新');
+}
+
+async function renameHomeScreenPreset(id) {
+    const preset = (db.homeScreenPresets || []).find(p => p.id === id);
+    if (!preset) return;
+    const input = prompt('请输入新的预设名称:', preset.name);
+    if (input === null) return;
+    const name = input.trim().slice(0, 40);
+    if (!name || name === preset.name) return;
+    if (db.homeScreenPresets.some(p => p.id !== id && p.name === name)) { showToast('已有同名预设，请换一个名称'); return; }
+    preset.name = name;
+    preset.updatedAt = Date.now();
+    await saveData();
+    renderCustomizeForm();
+    showToast('预设已改名');
+}
+
+async function deleteHomeScreenPreset(id) {
+    const preset = (db.homeScreenPresets || []).find(p => p.id === id);
+    if (!preset) return;
+    if (!confirm(`删除预设「${preset.name}」？`)) return;
+    db.homeScreenPresets = db.homeScreenPresets.filter(p => p.id !== id);
+    await saveData();
+    renderCustomizeForm();
+    showToast('预设已删除');
 }
 
 function setupCustomizeApp() {
     const customizeForm = document.getElementById('customize-form');
     
+    document.body.addEventListener('change', async (e) => {
+        if (e.target && e.target.id === 'home-preset-import-input') {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (file) await importHomeScreenPresets(file);
+        }
+    });
+
     document.body.addEventListener('click', async (e) => {
         const target = e.target;
 
@@ -39,6 +336,14 @@ function setupCustomizeApp() {
                 return; 
             }
         }
+
+        if (target.matches('#home-preset-save-btn')) { await saveHomeScreenPreset(); return; }
+        if (target.matches('.home-preset-apply-btn')) { await applyHomeScreenPreset(target.dataset.id); return; }
+        if (target.matches('#home-preset-import-btn')) { document.getElementById('home-preset-import-input')?.click(); return; }
+        if (target.matches('.home-preset-rename-btn')) { await renameHomeScreenPreset(target.dataset.id); return; }
+        if (target.matches('.home-preset-export-btn')) { await exportHomeScreenPreset(target.dataset.id); return; }
+        if (target.matches('.home-preset-update-btn')) { await updateHomeScreenPreset(target.dataset.id); return; }
+        if (target.matches('.home-preset-delete-btn')) { await deleteHomeScreenPreset(target.dataset.id); return; }
 
         if (target.matches('.reset-icon-btn')) {
             const iconId = target.dataset.id;
@@ -58,6 +363,22 @@ function setupCustomizeApp() {
             applyGlobalCss(newCss);
             await saveData();
             showToast('全局样式已应用');
+        }
+
+        // 全局 CSS：重置当前代码框内容为空白，不修改已保存的全局 CSS。
+        if (target.matches('#reset-global-css-btn')) {
+            const textarea = document.getElementById('global-beautification-css');
+            if (textarea) {
+                textarea.value = '';
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                showToast('已清空当前代码');
+            }
+        }
+
+        // 全局 CSS：从 TXT / DOCX 导入代码到当前代码框。
+        if (target.matches('#global-css-import-btn')) {
+            const input = document.getElementById('global-css-file-input');
+            if (input) input.click();
         }
         
         if (target.matches('#global-css-apply-btn')) {
@@ -352,10 +673,10 @@ function renderCustomizeForm() {
     const iconOrder = [
         'chat-list-screen', 'api-settings-screen', 'wallpaper-screen',
         'world-book-screen', 'customize-screen', 'tutorial-screen',
-        'day-mode-btn', 'night-mode-btn', 'forum-screen', 'music-screen', 'console-screen', 'pomodoro-screen', 'storage-analysis-screen', 'widget-market-screen', 'reader-bookshelf-screen', 'placeholder-app'
+        'day-mode-btn', 'night-mode-btn', 'forum-screen', 'console-screen', 'pomodoro-screen', 'storage-analysis-screen', 'widget-market-screen', 'reader-bookshelf-screen', 'placeholder-app'
     ];
 
-    let iconsContentHTML = '';
+    let iconsContentHTML = buildHomePresetsHTML();
     iconOrder.forEach(id => {
         if (!defaultIcons[id]) return;
         const { name, url } = defaultIcons[id];
@@ -443,8 +764,8 @@ function renderCustomizeForm() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
             </div>
             <div class="kkt-item-content">
-                <div class="kkt-item-title">自定义图标</div>
-                <div class="kkt-item-subtitle">修改主页应用图标</div>
+                <div class="kkt-item-title">自定义图标与预设</div>
+                <div class="kkt-item-subtitle">修改主页图标，保存与切换主屏幕预设</div>
             </div>
             <span class="kkt-arrow">›</span>
         </div>
@@ -499,9 +820,34 @@ function renderCustomizeForm() {
                     <button class="icon-btn-simple" onclick="document.getElementById('global-css-modal').classList.remove('visible')">✕</button>
                 </div>
                 <div class="form-group" style="margin-top: 15px; margin-bottom: 15px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px;">
                         <label for="global-beautification-css" style="font-weight: bold; font-size: 14px; color: var(--primary-color); margin-bottom: 0;">CSS代码</label>
-                        <button type="button" id="apply-global-css-now-btn" class="btn btn-primary btn-small" style="width:auto;">立即应用</button>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <input type="file" id="global-css-file-input" accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none;">
+                            <button type="button" id="global-css-import-btn" class="btn btn-small" style="width:auto;">导入</button>
+                            <button type="button" id="reset-global-css-btn" class="btn btn-small" style="width:auto;">重置</button>
+                            <button type="button" id="apply-global-css-now-btn" class="btn btn-primary btn-small" style="width:auto;">立即应用</button>
+                        </div>
+                    </div>
+                    <!-- 全局 CSS 搜索工具栏：复用聊天美化的搜索/高亮样式与交互。 -->
+                    <div class="textarea-edit-toolbar" id="global-css-toolbar">
+                        <button type="button" class="toolbar-toggle-btn" title="搜索与替换">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </button>
+                        <div class="toolbar-main-box" style="display: none;">
+                            <div class="toolbar-search-row">
+                                <input type="text" class="toolbar-search-input" placeholder="搜索...">
+                                <span class="toolbar-match-count">0/0</span>
+                                <button type="button" class="toolbar-prev-btn" title="上一个"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg></button>
+                                <button type="button" class="toolbar-next-btn" title="下一个"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+                                <button type="button" class="toolbar-expand-replace-btn" title="展开替换"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 6 12 11 17 6"></polyline></svg></button>
+                            </div>
+                            <div class="toolbar-replace-row" style="display: none;">
+                                <input type="text" class="toolbar-replace-input" placeholder="替换为...">
+                                <button type="button" class="toolbar-replace-btn" title="替换当前"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg></button>
+                                <button type="button" class="toolbar-replace-all-btn" title="全部替换"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+                            </div>
+                        </div>
                     </div>
                     <textarea id="global-beautification-css" class="form-group" rows="8" placeholder="在此输入CSS代码..." style="width:100%; border:1px solid #eee; border-radius:8px; padding:10px; font-family: monospace; font-size: 12px;"></textarea>
                 </div>
@@ -574,7 +920,7 @@ function renderCustomizeForm() {
         <div id="icon-settings-modal" class="modal-overlay">
             <div class="modal-window" style="max-height: 80vh; overflow-y: auto;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0;">自定义图标</h3>
+                    <h3 style="margin: 0;">自定义图标与预设</h3>
                     <button class="icon-btn-simple" onclick="document.getElementById('icon-settings-modal').classList.remove('visible')">✕</button>
                 </div>
                 <div style="border-top: 1px solid #f5f5f5; padding-top: 15px;">
@@ -616,5 +962,38 @@ function renderCustomizeForm() {
     const globalCssTextarea = document.getElementById('global-beautification-css');
     if (globalCssTextarea) {
         globalCssTextarea.value = db.globalCss || '';
+    }
+
+    // 全局 CSS 搜索：直接复用聊天美化已有的搜索/替换组件，保持高亮、计数、上下匹配等行为一致。
+    if (typeof initTextareaSearchReplace === 'function') {
+        initTextareaSearchReplace('global-css-toolbar', 'global-beautification-css');
+    }
+
+    const globalCssFileInput = document.getElementById('global-css-file-input');
+    if (globalCssFileInput && !globalCssFileInput.dataset.bound) {
+        globalCssFileInput.dataset.bound = '1';
+        globalCssFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            try {
+                let text = '';
+                if (/\.docx$/i.test(file.name)) {
+                    if (typeof mammoth === 'undefined') throw new Error('Word 解析库未加载');
+                    const buffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                    text = result.value || '';
+                } else {
+                    text = await file.text();
+                }
+                globalCssTextarea.value = text;
+                globalCssTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                showToast(`已导入 ${file.name}`);
+            } catch (error) {
+                console.error('导入全局 CSS 失败:', error);
+                showToast('文件读取失败，请使用 TXT 或 DOCX 文件');
+            } finally {
+                e.target.value = '';
+            }
+        });
     }
 }

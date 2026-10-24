@@ -220,6 +220,45 @@ function setupChatSettings() {
         });
     }
 
+    const stickerMatchSwitch = document.getElementById('setting-sticker-match-enabled');
+    const stickerMatchPosition = document.getElementById('setting-sticker-match-position');
+    const stickerMatchPositionContainer = document.getElementById('setting-sticker-match-position-container');
+    const stickerMatchPositionValue = document.getElementById('setting-sticker-match-position-value');
+    const stickerMatchPositionReset = document.getElementById('setting-sticker-match-position-reset');
+    const STICKER_MATCH_POSITION_DEFAULT = 0;
+    const updateStickerMatchPositionUI = (enabled, value) => {
+        const position = Math.min(220, Math.max(-100, parseInt(value, 10) || STICKER_MATCH_POSITION_DEFAULT));
+        if (stickerMatchPositionContainer) stickerMatchPositionContainer.style.display = enabled ? 'flex' : 'none';
+        if (stickerMatchPosition) stickerMatchPosition.value = position;
+        if (stickerMatchPositionValue) stickerMatchPositionValue.textContent = String(position);
+    };
+    const patSwitchEl = document.getElementById('setting-pat-enabled');
+    if (patSwitchEl) {
+        patSwitchEl.addEventListener('change', (ev) => {
+            const c = document.getElementById('setting-pat-container');
+            if (c) c.style.display = ev.target.checked ? 'flex' : 'none';
+        });
+    }
+    if (stickerMatchSwitch) {
+        stickerMatchSwitch.addEventListener('change', (e) => {
+            triggerHapticFeedback('light');
+            updateStickerMatchPositionUI(e.target.checked, stickerMatchPosition ? stickerMatchPosition.value : STICKER_MATCH_POSITION_DEFAULT);
+        });
+    }
+    if (stickerMatchPosition) {
+        stickerMatchPosition.addEventListener('input', (e) => {
+            if (stickerMatchPositionValue) stickerMatchPositionValue.textContent = e.target.value;
+            if (typeof window.refreshStickerMatchPopup === 'function') window.refreshStickerMatchPopup();
+        });
+    }
+    if (stickerMatchPositionReset) {
+        stickerMatchPositionReset.addEventListener('click', () => {
+            triggerHapticFeedback('light');
+            updateStickerMatchPositionUI(!!stickerMatchSwitch?.checked, STICKER_MATCH_POSITION_DEFAULT);
+            if (typeof window.refreshStickerMatchPopup === 'function') window.refreshStickerMatchPopup();
+        });
+    }
+
     // 专属模型开关逻辑 (私聊)
     const exclusiveApiSwitch = document.getElementById('setting-exclusive-api-enabled');
     if (exclusiveApiSwitch) {
@@ -421,6 +460,29 @@ function loadSettingsToSidebar() {
         document.getElementById('setting-reply-count-min').value = e.replyCountMin || 3;
         document.getElementById('setting-reply-count-max').value = e.replyCountMax || 8;
 
+        const stickerMatchSwitch = document.getElementById('setting-sticker-match-enabled');
+        const stickerMatchPosition = document.getElementById('setting-sticker-match-position');
+        const stickerMatchPositionContainer = document.getElementById('setting-sticker-match-position-container');
+        const stickerMatchPositionValue = document.getElementById('setting-sticker-match-position-value');
+        const stickerMatchEnabled = e.stickerMatchEnabled || false;
+        const stickerMatchPositionValueNum = Math.min(220, Math.max(-100, parseInt(e.stickerMatchPosition, 10) || 0));
+        if (stickerMatchSwitch) stickerMatchSwitch.checked = stickerMatchEnabled;
+        if (stickerMatchPosition) stickerMatchPosition.value = stickerMatchPositionValueNum;
+        if (stickerMatchPositionContainer) stickerMatchPositionContainer.style.display = stickerMatchEnabled ? 'flex' : 'none';
+        if (stickerMatchPositionValue) stickerMatchPositionValue.textContent = stickerMatchPositionValueNum;
+
+        const patSwitch = document.getElementById('setting-pat-enabled');
+        const patEnabled = !!e.patEnabled;
+        if (patSwitch) patSwitch.checked = patEnabled;
+        const patContainer = document.getElementById('setting-pat-container');
+        if (patContainer) patContainer.style.display = patEnabled ? 'flex' : 'none';
+        const patMy = document.getElementById('setting-pat-my-suffix');
+        if (patMy) patMy.value = e.patMySuffix || '';
+        const patChar = document.getElementById('setting-pat-char-suffix');
+        if (patChar) patChar.value = (e.patCharSuffix === undefined) ? '的脑袋' : e.patCharSuffix;
+        const patAi = document.getElementById('setting-pat-ai-suffix');
+        if (patAi) patAi.checked = !!e.patAiSuffix;
+
         // 专属模型
         const exclusiveApiSwitch = document.getElementById('setting-exclusive-api-enabled');
         const exclusiveApiContainer = document.getElementById('setting-exclusive-api-container');
@@ -481,6 +543,18 @@ function loadSettingsToSidebar() {
 
         document.getElementById('setting-bilingual-mode').checked = e.bilingualModeEnabled || false;
         document.getElementById('setting-bilingual-style').value = e.bilingualBubbleStyle || 'under';
+        // 「翻译显示样式」只有开启双语聊天模式时才有用，关闭时收起。
+        const bilingualStyleContainer = document.getElementById('setting-bilingual-style-container');
+        const bilingualModeSwitch = document.getElementById('setting-bilingual-mode');
+        if (bilingualStyleContainer) {
+            bilingualStyleContainer.style.display = bilingualModeSwitch.checked ? 'flex' : 'none';
+            if (bilingualModeSwitch.dataset.styleToggleBound !== 'true') {
+                bilingualModeSwitch.dataset.styleToggleBound = 'true';
+                bilingualModeSwitch.addEventListener('change', () => {
+                    bilingualStyleContainer.style.display = bilingualModeSwitch.checked ? 'flex' : 'none';
+                });
+            }
+        }
         
         document.getElementById('setting-avatar-mode').value = e.avatarMode || 'full';
         const avatarRadius = e.avatarRadius !== undefined ? e.avatarRadius : 50;
@@ -529,6 +603,22 @@ function loadSettingsToSidebar() {
         autoReplyCheckbox.checked = ar.enabled || false;
         document.getElementById('setting-auto-reply-interval').value = ar.interval || 60;
         autoReplyCheckbox.dispatchEvent(new Event('change'));
+        {
+            const qh = ar.quietHours || {};
+            const qhEnabled = document.getElementById('setting-quiet-hours-enabled');
+            qhEnabled.checked = !!qh.enabled;
+            document.getElementById('setting-quiet-hours-start').value = qh.start || '00:00';
+            document.getElementById('setting-quiet-hours-end').value = qh.end || '08:00';
+            const tzSel = document.getElementById('setting-quiet-hours-tz');
+            const tzVal = qh.timezone || '';
+            if (tzVal && !Array.from(tzSel.options).some(o => o.value === tzVal)) {
+                tzSel.appendChild(new Option(tzVal, tzVal));
+            }
+            tzSel.value = tzVal;
+            const qhDetail = document.getElementById('quiet-hours-detail');
+            qhDetail.style.display = qhEnabled.checked ? '' : 'none';
+            qhEnabled.onchange = () => { qhDetail.style.display = qhEnabled.checked ? '' : 'none'; };
+        }
 
         const autoAirdropCheckbox = document.getElementById('setting-auto-airdrop-enabled');
         if (autoAirdropCheckbox) {
@@ -581,6 +671,87 @@ function initTextareaSearchReplace(toolbarId, textareaId) {
     let matches = [];
     let currentMatchIndex = -1;
 
+    // 只保留一个当前匹配项的高亮框。
+    // 不再复制整份代码，因此不会出现重影、加粗或颜色变深的问题。
+    const highlightWrap = document.createElement('div');
+    highlightWrap.className = 'textarea-highlight-wrap';
+    const currentHighlight = document.createElement('div');
+    currentHighlight.className = 'textarea-current-match-highlight';
+    highlightWrap.appendChild(currentHighlight);
+    textarea.parentNode.insertBefore(highlightWrap, textarea);
+    highlightWrap.appendChild(textarea);
+
+    // 隐藏测量层：使用与 textarea 完全相同的字体、内距和换行规则，
+    // 精确计算当前搜索结果在文本框里的位置。
+    const measure = document.createElement('div');
+    measure.className = 'textarea-search-measure';
+    const measurePrefix = document.createElement('span');
+    const measureHit = document.createElement('span');
+    measure.appendChild(measurePrefix);
+    measure.appendChild(measureHit);
+    document.body.appendChild(measure);
+
+    const syncMeasureStyle = () => {
+        const cs = getComputedStyle(textarea);
+        const props = [
+            'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
+            'letterSpacing', 'textTransform', 'textIndent', 'textAlign',
+            'wordSpacing', 'tabSize', 'whiteSpace', 'wordBreak', 'overflowWrap',
+            'boxSizing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'
+        ];
+        props.forEach(prop => {
+            measure.style[prop] = cs[prop];
+        });
+        measure.style.width = `${textarea.clientWidth}px`;
+        measure.style.minHeight = `${textarea.clientHeight}px`;
+        measure.style.margin = '0';
+        measure.style.border = '0';
+    };
+
+    function hideCurrentHighlight() {
+        currentHighlight.style.display = 'none';
+        highlightWrap.classList.remove('is-searching');
+    }
+
+    function updateCurrentHighlight() {
+        const query = searchInput.value;
+        if (!query || matches.length === 0 || currentMatchIndex < 0 || currentMatchIndex >= matches.length) {
+            hideCurrentHighlight();
+            return;
+        }
+
+        syncMeasureStyle();
+        const content = textarea.value;
+        const start = matches[currentMatchIndex];
+        const end = start + query.length;
+
+        measurePrefix.textContent = content.slice(0, start);
+        measureHit.textContent = content.slice(start, end);
+
+        // 强制浏览器完成测量。
+        const measureRect = measure.getBoundingClientRect();
+        const hitRect = measureHit.getBoundingClientRect();
+        const textareaRect = textarea.getBoundingClientRect();
+        const wrapRect = highlightWrap.getBoundingClientRect();
+
+        const left = (hitRect.left - measureRect.left)
+            + (textareaRect.left - wrapRect.left)
+            - textarea.scrollLeft;
+        const top = (hitRect.top - measureRect.top)
+            + (textareaRect.top - wrapRect.top)
+            - textarea.scrollTop;
+
+        currentHighlight.style.left = `${left}px`;
+        currentHighlight.style.top = `${top}px`;
+        currentHighlight.style.width = `${Math.max(hitRect.width, 2)}px`;
+        currentHighlight.style.height = `${Math.max(hitRect.height, parseFloat(getComputedStyle(textarea).lineHeight) || 20)}px`;
+        currentHighlight.style.display = 'block';
+        highlightWrap.classList.add('is-searching');
+    }
+
+    textarea.addEventListener('scroll', updateCurrentHighlight);
+    window.addEventListener('resize', updateCurrentHighlight);
+
     // 1. 折叠/展开逻辑
     toggleBtn.addEventListener('click', () => {
         const isHidden = mainBox.style.display === 'none';
@@ -588,6 +759,8 @@ function initTextareaSearchReplace(toolbarId, textareaId) {
         if (isHidden) {
             searchInput.focus();
             performSearch();
+        } else {
+            hideCurrentHighlight();
         }
     });
 
@@ -613,33 +786,49 @@ function initTextareaSearchReplace(toolbarId, textareaId) {
             }
         }
 
-        updateUI();
+        if (matches.length > 0) {
+            currentMatchIndex = 0;
+            matchCountSpan.textContent = `1/${matches.length}`;
+            revealCurrentMatch(false);
+        } else {
+            matchCountSpan.textContent = '0/0';
+            hideCurrentHighlight();
+        }
     }
 
     function updateUI() {
         if (matches.length > 0) {
             if (currentMatchIndex === -1) currentMatchIndex = 0;
             matchCountSpan.textContent = `${currentMatchIndex + 1}/${matches.length}`;
+            updateCurrentHighlight();
         } else {
-            matchCountSpan.textContent = `0/0`;
+            matchCountSpan.textContent = '0/0';
+            hideCurrentHighlight();
         }
     }
 
-    function scrollToMatch() {
-        if (currentMatchIndex >= 0 && currentMatchIndex < matches.length) {
-            const start = matches[currentMatchIndex];
-            const end = start + searchInput.value.length;
-            textarea.focus();
-            textarea.setSelectionRange(start, end);
-            
-            // 简单的滚动定位：计算大概位置
-            const lineHeight = 20; // 估算行高
-            const textBefore = textarea.value.substring(0, start);
-            const linesBefore = textBefore.split('\n').length;
-            textarea.scrollTop = (linesBefore - 2) * lineHeight;
-            
-            updateUI();
-        }
+    function revealCurrentMatch(shouldFocus = true) {
+        if (currentMatchIndex < 0 || currentMatchIndex >= matches.length) return;
+
+        const start = matches[currentMatchIndex];
+        const end = start + searchInput.value.length;
+
+        // 不再调用 focus / setSelectionRange。
+        // 当前结果只显示自定义浅蓝色高亮，不产生原生文字选取，
+        // 这样切换上一個/下一個时不会弹出输入键盘，也不会出现原生选区。
+
+        // 用测量层得到当前结果所在的实际行数，再把它滚到可见区域。
+        syncMeasureStyle();
+        measurePrefix.textContent = textarea.value.slice(0, start);
+        measureHit.textContent = textarea.value.slice(start, end);
+        const measureRect = measure.getBoundingClientRect();
+        const hitRect = measureHit.getBoundingClientRect();
+        const hitTop = hitRect.top - measureRect.top;
+        const hitHeight = Math.max(hitRect.height, parseFloat(getComputedStyle(textarea).lineHeight) || 20);
+        const targetTop = Math.max(0, hitTop - textarea.clientHeight / 2 + hitHeight / 2);
+        textarea.scrollTop = targetTop;
+
+        updateUI();
     }
 
     searchInput.addEventListener('input', performSearch);
@@ -647,34 +836,34 @@ function initTextareaSearchReplace(toolbarId, textareaId) {
     prevBtn.addEventListener('click', () => {
         if (matches.length === 0) return;
         currentMatchIndex = (currentMatchIndex - 1 + matches.length) % matches.length;
-        scrollToMatch();
+        revealCurrentMatch(true);
     });
 
     nextBtn.addEventListener('click', () => {
         if (matches.length === 0) return;
         currentMatchIndex = (currentMatchIndex + 1) % matches.length;
-        scrollToMatch();
+        revealCurrentMatch(true);
     });
 
     // 3. 替换逻辑
     replaceBtn.addEventListener('click', () => {
         if (currentMatchIndex === -1 || matches.length === 0) return;
-        
+
         const query = searchInput.value;
         const replacement = replaceInput.value;
         const start = matches[currentMatchIndex];
         const end = start + query.length;
-        
+
         const content = textarea.value;
         textarea.value = content.substring(0, start) + replacement + content.substring(end);
-        
+
         // 触发 input 事件以更新预览
         textarea.dispatchEvent(new Event('input'));
-        
-        performSearch(); // 重新搜索
+
+        performSearch();
         if (matches.length > 0) {
             currentMatchIndex = Math.min(currentMatchIndex, matches.length - 1);
-            scrollToMatch();
+            revealCurrentMatch(true);
         }
         triggerHapticFeedback('light');
     });
@@ -682,16 +871,16 @@ function initTextareaSearchReplace(toolbarId, textareaId) {
     replaceAllBtn.addEventListener('click', () => {
         const query = searchInput.value;
         if (!query) return;
-        
+
         const replacement = replaceInput.value;
         const content = textarea.value;
         const newContent = content.split(query).join(replacement);
-        
+
         if (content === newContent) {
             showToast('未找到匹配内容');
             return;
         }
-        
+
         textarea.value = newContent;
         textarea.dispatchEvent(new Event('input'));
         performSearch();
@@ -748,6 +937,12 @@ async function saveSettingsFromSidebar() {
         e.replyCountEnabled = document.getElementById('setting-reply-count-enabled').checked;
         e.replyCountMin = parseInt(document.getElementById('setting-reply-count-min').value, 10) || 3;
         e.replyCountMax = parseInt(document.getElementById('setting-reply-count-max').value, 10) || 8;
+        e.stickerMatchEnabled = document.getElementById('setting-sticker-match-enabled')?.checked || false;
+        e.stickerMatchPosition = Math.min(220, Math.max(-100, parseInt(document.getElementById('setting-sticker-match-position')?.value, 10) || 0));
+        e.patEnabled = document.getElementById('setting-pat-enabled')?.checked || false;
+        e.patMySuffix = (document.getElementById('setting-pat-my-suffix')?.value || '').trim().slice(0, 20);
+        e.patCharSuffix = (document.getElementById('setting-pat-char-suffix')?.value || '').trim().slice(0, 20);
+        e.patAiSuffix = document.getElementById('setting-pat-ai-suffix')?.checked || false;
         
         const exclusiveApiSwitch = document.getElementById('setting-exclusive-api-enabled');
         if (exclusiveApiSwitch) {
@@ -829,10 +1024,22 @@ async function saveSettingsFromSidebar() {
 
         e.videoCallEnabled = document.getElementById('setting-video-call-enabled').checked;
 
+        const previousAutoReplyEnabled = !!(e.autoReply && e.autoReply.enabled);
+        const previousAutoReplyInterval = Number((e.autoReply && e.autoReply.interval) || 60);
         if (!e.autoReply) e.autoReply = {};
         e.autoReply.enabled = document.getElementById('setting-auto-reply-enabled').checked;
         const autoReplyIntervalInput = parseInt(document.getElementById('setting-auto-reply-interval').value, 10);
         e.autoReply.interval = isNaN(autoReplyIntervalInput) ? 60 : autoReplyIntervalInput;
+        const previousQuietHours = JSON.stringify(e.autoReply.quietHours || null);
+        e.autoReply.quietHours = {
+            enabled: document.getElementById('setting-quiet-hours-enabled').checked,
+            start: document.getElementById('setting-quiet-hours-start').value || '00:00',
+            end: document.getElementById('setting-quiet-hours-end').value || '08:00',
+            timezone: document.getElementById('setting-quiet-hours-tz').value || ''
+        };
+        const autoReplyChanged = previousAutoReplyEnabled !== !!e.autoReply.enabled
+            || previousAutoReplyInterval !== Number(e.autoReply.interval || 60)
+            || previousQuietHours !== JSON.stringify(e.autoReply.quietHours);
 
         const autoAirdropCheckbox = document.getElementById('setting-auto-airdrop-enabled');
         if (autoAirdropCheckbox) {
@@ -843,6 +1050,15 @@ async function saveSettingsFromSidebar() {
 
         await saveData();
         showToast('设置已保存！');
+        // 开了 Cloudflare 后台时，自动消息的开关/间隔要马上同步到 Worker，
+        // 否则 Worker 会按旧设置继续发主动消息。
+        if (autoReplyChanged && window.UwUBackendAdapter?.isCloudflareEnabled?.()) {
+            try {
+                await window.UwUBackendAdapter.syncAutoReplySettings(e);
+            } catch (syncError) {
+                showToast(`自动消息设置未能同步到云端：${syncError.message}。下次打开 UwU 会自动重试。`);
+            }
+        }
         chatRoomTitle.textContent = e.remarkName;
         renderChatList();
         // updateCustomBubbleStyle(currentChatId, e.customBubbleCss, e.useCustomBubbleCss); // 移除实时应用以防污染设置页

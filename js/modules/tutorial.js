@@ -19,12 +19,31 @@ function renderUpdateLog() {
 
     let notesHtml = '';
     updateLog.forEach((log, index) => {
+        const sectionHeadings = ['1900UwU二改版——UmU', '前排特别感谢', '功能介绍', '新增', '修复'];
+        const renderedNotes = /\.UmU$/.test(log.version)
+            ? log.notes.map(note => {
+                if (note.includes('————————')) {
+                    return '<hr style="margin: 10px 0; border: 0; border-top: 1px dashed #ccc;">';
+                }
+                if (sectionHeadings.includes(note)) {
+                    return `<h5 style="font-size: 14px; color: #333; margin: 12px 0 6px;">${note}</h5>`;
+                }
+                if (note.startsWith('!')) {
+                    return `<div style="margin: 12px 0 6px; color: #333; font-size: 13px; font-weight: 600;">${note.slice(1)}</div>`;
+                }
+                const bold = note.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                if (bold.startsWith('^')) {
+                    return `<div style="margin-bottom: 5px; color: #666; padding-left: 20px;">${bold.slice(1)}</div>`;
+                }
+                return `<div style="margin-bottom: 5px; color: #666; padding-left: 20px; position: relative;"><span style="position: absolute; left: 0; top: 0;">›</span>${bold}</div>`;
+            }).join('')
+            : `<ul style="padding-left: 20px; margin: 0; list-style-type: '› ';">
+                ${log.notes.map(note => `<li style="margin-bottom: 5px; color: #666;">${note}</li>`).join('')}
+            </ul>`;
         notesHtml += `
             <div style="margin-bottom: 15px; ${index < updateLog.length - 1 ? 'padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;' : ''}">
                 <h4 style="font-size: 15px; color: #333; margin: 0 0 5px 0;">版本 ${log.version} (${log.date})</h4>
-                <ul style="padding-left: 20px; margin: 0; list-style-type: '› ';">
-                    ${log.notes.map(note => `<li style="margin-bottom: 5px; color: #666;">${note}</li>`).join('')}
-                </ul>
+                ${/\.UmU$/.test(log.version) ? `<div style="padding-left: 5px; margin: 0;">${renderedNotes}</div>` : renderedNotes}
             </div>
         `;
     });
@@ -52,15 +71,21 @@ function showUpdateModal() {
     latestLog.notes.forEach(note => {
         // 处理加粗标记 **text** -> <b>text</b>
         let formattedNote = note.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+        const sectionHeadings = ['1900UwU二改版——UmU', '前排特别感谢', '功能介绍', '新增', '修复'];
 
         if (note.includes('————')) {
             // 分割线
             notesHtml += '<hr style="margin: 15px 0; border: 0; border-top: 1px dashed #ccc;">';
-        } else if (/^\d+\./.test(note)) {
-            // 标题行 (例如 "1.日记功能升级！")
+        } else if (sectionHeadings.includes(note)) {
             notesHtml += `<h4 style="margin: 15px 0 8px; color: #333; font-size: 15px; font-weight: 600;">${formattedNote}</h4>`;
+        } else if (formattedNote.startsWith('!')) {
+            // 醒目提醒：不加圆点，加粗，与小标题左对齐
+            notesHtml += `<div style="margin: 12px 0 6px; color: #333; font-size: 13px; font-weight: 600; line-height: 1.5;">${formattedNote.slice(1)}</div>`;
+        } else if (formattedNote.startsWith('^')) {
+            // 接续上一条的说明：不加圆点，缩进与圆点条目的文字对齐。
+            notesHtml += `<div style="margin-bottom: 6px; color: #555; font-size: 13px; line-height: 1.5; padding-left: 12px;">${formattedNote.slice(1)}</div>`;
         } else {
-            // 普通内容行
+            // 说明与编号条目统一使用小字圆点，只有分组标题保持粗体。
             notesHtml += `<div style="margin-bottom: 6px; color: #555; font-size: 13px; line-height: 1.5; padding-left: 12px; position: relative;">
                 <span style="position: absolute; left: 0; top: 0; color: #999;">•</span>${formattedNote}
             </div>`;

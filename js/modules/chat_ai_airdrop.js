@@ -182,7 +182,7 @@ async function generateTagsFromDescription(chat, messageId) {
         }
         
         // 简单清理系统标签
-        content = content.replace(/^\[system:.*?\]\s*/, '').replace(/^\(时间:.*?\)\s*/, '');
+        content = content.replace(/^\[system:[\s\S]*?\]\s*/, '').replace(/^\(时间:.*?\)\s*/, '');
         
         contextText += `${senderName}: ${content}\n`;
     });

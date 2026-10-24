@@ -25,9 +25,9 @@ function handleMessageLongPress(messageWrapper, x, y) {
     
     let invisibleRegex;
     if (chat.showStatusUpdateMsg) {
-        invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?已接收礼物\]|\[system:.*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:.*?\]/;
+        invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?已接收礼物\]|\[system:[\s\S]*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:[\s\S]*?\]/;
     } else {
-        invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?更新状态为：.*?\]|\[.*?已接收礼物\]|\[system:.*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:.*?\]/;
+        invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?更新状态为：.*?\]|\[.*?已接收礼物\]|\[system:[\s\S]*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:[\s\S]*?\]/;
     }
     const isInvisibleMessage = invisibleRegex.test(message.content);
     const isWithdrawn = message.isWithdrawn; 
@@ -351,7 +351,7 @@ async function saveMessageEdit() {
         }
 
         if (isRawEditMode) {
-            const quoteRegex = /^\[(.*?)引用[“"]([\s\S]*?)[”"]并回复：([\s\S]*?)\]$/;
+            const quoteRegex = /^\[(.*?)引用\s*[“"「『]([\s\S]*?)[”"」』]\s*[并並]?\s*(?:回复|回覆|回復)\s*[：:]\s*([\s\S]*?)\]$/;
             const match = newText.match(quoteRegex);
 
             if (match) {
@@ -359,6 +359,8 @@ async function saveMessageEdit() {
                 const quoteContent = match[2];
                 const replyText = match[3];
 
+                // 旧消息没有保存引用时，在编辑框里按引用格式保存也能补上引用样式。
+                if (!chat.history[messageIndex].quote) chat.history[messageIndex].quote = { messageId: null, senderId: 'user_me', content: quoteContent };
                 if (chat.history[messageIndex].quote) {
                     chat.history[messageIndex].quote.content = quoteContent;
 

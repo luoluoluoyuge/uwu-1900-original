@@ -72,6 +72,7 @@ function setupPeekFeature() {
 
     peekMenuMomentsBtn?.addEventListener('click', () => {
         peekActionSheet.classList.remove('visible');
+        momentsOnlyChar = false;
         renderMomentsScreen();
         switchScreen('moments-screen');
     });
@@ -242,11 +243,30 @@ function setupMomentsFeature() {
         }
     });
 
-    // 刷新按钮
-    refreshBtn?.addEventListener('click', () => {
+    // 右上角相机按钮：弹出小列表（发布动态 / 刷新）
+    const actionMenu = document.getElementById('moments-action-menu');
+    refreshBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const onlyItem = document.getElementById('moments-menu-only-char');
+        if (onlyItem) onlyItem.textContent = momentsOnlyChar ? '显示全部' : '只看他';
+        if (actionMenu) actionMenu.style.display = actionMenu.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById('moments-menu-only-char')?.addEventListener('click', () => {
+        momentsOnlyChar = !momentsOnlyChar;
+        renderMomentsScreen();
+        showToast(momentsOnlyChar ? '只显示他的动态' : '已显示全部动态');
+    });
+    document.addEventListener('click', () => {
+        if (actionMenu) actionMenu.style.display = 'none';
+    });
+    document.getElementById('moments-menu-refresh')?.addEventListener('click', () => {
         renderMomentsScreen();
         showToast('动态已刷新');
     });
+    document.getElementById('moments-menu-post')?.addEventListener('click', () => {
+        openMomentComposeModal();
+    });
+    setupMomentComposeModal();
 
     // 点击角色签名，由用户直接修改
     signatureEl?.addEventListener('click', async (e) => {
@@ -326,7 +346,13 @@ function setupMomentsFeature() {
 
             // 否则认为是长按了动态本体
             const momentId = momentItem.dataset.id;
-            if (confirm('确定要删除这条动态吗？')) {
+            let statusLine = '';
+            const pressedChar = db.characters.find(c => c.id === currentChatId);
+            const pressedMoment = pressedChar && pressedChar.moments ? pressedChar.moments.find(m => m.id === momentId) : null;
+            if (pressedMoment && pressedMoment.isUser) {
+                statusLine = (pressedMoment.seenAt ? '状态：已看' : '状态：未看') + '\n\n';
+            }
+            if (confirm(statusLine + '确定要删除这条动态吗？')) {
                 deleteMoment(momentId);
             }
         }, 800); // 800ms 算作长按
@@ -483,6 +509,9 @@ async function updateMomentsSignature(newSignature) {
     showToast('个性签名已修改');
 }
 
+// 「只看他」：只显示角色自己的动态，隐藏用户发的（仅本次打开有效）
+let momentsOnlyChar = false;
+
 function renderMomentsScreen() {
     const char = db.characters.find(c => c.id === currentChatId);
     if (!char) return;
@@ -506,7 +535,7 @@ function renderMomentsScreen() {
 
     // 渲染动态列表
     const feedContainer = document.getElementById('moments-feed-container');
-    const moments = char.moments || [];
+    const moments = (char.moments || []).filter(m => !(momentsOnlyChar && m.isUser));
 
     if (moments.length === 0) {
         feedContainer.innerHTML = '<div style="text-align: center; padding: 50px; color: #999;">暂无动态</div>';
@@ -585,12 +614,17 @@ function renderMomentsScreen() {
         // 时间格式化
         const timeStr = formatMomentTime(moment.timestamp);
 
+        const isUserMoment = !!moment.isUser;
+        const momentAvatar = isUserMoment ? (char.myAvatar || char.avatar) : char.avatar;
+        const momentName = isUserMoment ? (char.myName || '我') : ((char.remarkName && char.remarkName.trim()) || char.realName || 'Character');
+        const momentTextHtml = isUserMoment ? escapeMomentHtml(moment.content).replace(/\n/g, '<br>') : moment.content.replace(/\n/g, '<br>');
+
         html += `
             <div class="moment-item" data-id="${moment.id}">
-                <img src="${char.avatar}" class="moment-avatar" alt="Avatar">
+                <img src="${momentAvatar}" class="moment-avatar" alt="Avatar">
                 <div class="moment-main">
-                    <div class="moment-name">${(char.remarkName && char.remarkName.trim()) || char.realName || 'Character'}</div>
-                    <div class="moment-text">${moment.content.replace(/\n/g, '<br>')}</div>
+                    <div class="moment-name">${isUserMoment ? escapeMomentHtml(momentName) : momentName}</div>
+                    <div class="moment-text">${momentTextHtml}</div>
                     ${imagesHtml}
                     <div class="moment-footer">
                         <span class="moment-time">${timeStr}</span>
@@ -615,6 +649,130 @@ function renderMomentsScreen() {
     });
 
     feedContainer.innerHTML = html;
+}
+
+function escapeMomentHtml(text) {
+    return String(text == null ? '' : text)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ---------- 用户自己发布动态 ----------
+function openMomentComposeModal() {
+    const modal = document.getElementById('moment-compose-modal');
+    if (!modal) return;
+    document.getElementById('moment-compose-text').value = '';
+    document.getElementById('moment-compose-img-desc').value = '';
+    document.getElementById('moment-compose-img-url').value = '';
+    document.getElementById('moment-compose-img-fields').style.display = 'none';
+    document.getElementById('moment-compose-add-img').style.display = '';
+    modal.classList.add('visible');
+    setTimeout(() => document.getElementById('moment-compose-text').focus(), 50);
+}
+
+function closeMomentComposeModal() {
+    document.getElementById('moment-compose-modal')?.classList.remove('visible');
+}
+
+function setupMomentComposeModal() {
+    const addBtn = document.getElementById('moment-compose-add-img');
+    const fields = document.getElementById('moment-compose-img-fields');
+    if (!addBtn || addBtn.dataset.bound === 'true') return;
+    addBtn.dataset.bound = 'true';
+
+    addBtn.addEventListener('click', () => {
+        fields.style.display = 'block';
+        addBtn.style.display = 'none';
+        document.getElementById('moment-compose-img-desc').focus();
+    });
+    document.getElementById('moment-compose-remove-img').addEventListener('click', () => {
+        document.getElementById('moment-compose-img-desc').value = '';
+        document.getElementById('moment-compose-img-url').value = '';
+        fields.style.display = 'none';
+        addBtn.style.display = '';
+    });
+    document.getElementById('moment-compose-cancel').addEventListener('click', closeMomentComposeModal);
+    document.getElementById('moment-compose-confirm').addEventListener('click', async () => {
+        const text = document.getElementById('moment-compose-text').value.trim();
+        if (!text) return showToast('请先写点内容');
+        let desc = '';
+        let url = '';
+        if (fields.style.display !== 'none') {
+            desc = document.getElementById('moment-compose-img-desc').value.trim();
+            url = document.getElementById('moment-compose-img-url').value.trim();
+            if (url && !/^https?:\/\//i.test(url)) return showToast('图片链接需要以 http:// 或 https:// 开头');
+            if (!desc) return showToast('添加图片时，请填写图片画面描述');
+        }
+        await addUserMoment(text, desc, url);
+        closeMomentComposeModal();
+    });
+}
+
+async function addUserMoment(text, imageDesc, imageUrl) {
+    const char = db.characters.find(c => c.id === currentChatId);
+    if (!char) return;
+    if (!char.moments) char.moments = [];
+
+    const myName = char.myName || '我';
+    const now = Date.now();
+    const sysMsgId = `msg_${now}_${Math.random()}`;
+
+    const moment = {
+        id: `moment_${now}`,
+        author: myName,
+        isUser: true,
+        content: text,
+        timestamp: now,
+        likes: [],
+        comments: [],
+        historyMsgId: sysMsgId
+    };
+    if (imageDesc) {
+        if (imageUrl) {
+            // 有图片链接：直接显示这张图；画面描述只给 AI 看。
+            moment.images = [imageUrl];
+            moment.userImageNote = imageDesc;
+        } else {
+            // 没有链接：和角色的带图动态一样，用占位图 + 点击查看画面描述。
+            moment.imageDescription = imageDesc;
+        }
+    }
+    char.moments.unshift(moment);
+
+    // 写入一条系统消息，让角色在下次回复时知道（与评论的做法一致）。
+    // 方括号和换行会破坏系统消息的识别，先替换掉。
+    const clean = (str) => String(str || '').replace(/[\r\n]+/g, ' ').replace(/\[/g, '【').replace(/\]/g, '】');
+    let sysMsg = `[system: ${myName}发布了一条动态“${clean(text).slice(0, 200)}”`;
+    if (imageDesc) sysMsg += `，配图画面：${clean(imageDesc)}`;
+    sysMsg += ']';
+
+    char.history.push({
+        id: sysMsgId,
+        role: 'user',
+        content: sysMsg,
+        timestamp: now,
+        isContextDisabled: false
+    });
+
+    await saveData();
+    renderMomentsScreen();
+    if (typeof renderMessages === 'function') renderMessages(false, false);
+    showToast('已发布，Ta 会在下次聊天时看到');
+}
+
+// 角色这次回复成功后，把回复发出前已经存在的用户动态标记为「Ta已看到」。
+function markUserMomentsSeen(chat, requestStartedAt) {
+    if (!chat || !chat.moments || !requestStartedAt) return;
+    let changed = false;
+    chat.moments.forEach(m => {
+        if (m.isUser && !m.seenAt && m.timestamp <= requestStartedAt) {
+            m.seenAt = Date.now();
+            changed = true;
+        }
+    });
+    if (changed && document.getElementById('moments-screen')?.classList.contains('active')) {
+        renderMomentsScreen();
+    }
 }
 
 function formatMomentTime(timestamp) {
@@ -642,7 +800,7 @@ async function toggleMomentLike(momentId) {
     const myName = char.myName || '我';
     const index = moment.likes.indexOf(myName);
     
-    const momentSnippet = moment.content.substring(0, 20); // 缩略内容
+    const momentSnippet = String(moment.content || "").replace(/\s+/g, " ").substring(0, 20); // 缩略内容
     let systemMsg = '';
 
     if (index > -1) {
@@ -683,7 +841,8 @@ async function deleteMoment(momentId) {
         // 1. 从聊天记录中删除对应的指令消息
         // 寻找包含该动态内容的原始指令消息
         const snippet = momentToDelete.content.substring(0, 20);
-        const msgIndex = char.history.findIndex(m => 
+        let msgIndex = momentToDelete.historyMsgId ? char.history.findIndex(m => m.id === momentToDelete.historyMsgId) : -1;
+        if (msgIndex === -1) msgIndex = char.history.findIndex(m => 
             m.content.includes('发布了一条动态') && m.content.includes(snippet) ||
             m.content.includes('发布了一条带图动态') && m.content.includes(snippet)
         );
@@ -758,7 +917,7 @@ async function addMomentComment(momentId, text, replyTo = null) {
     moment.comments.push(newComment);
 
     // 插入系统消息到历史记录，让AI知道
-    const momentSnippet = moment.content.substring(0, 20);
+    const momentSnippet = String(moment.content || "").replace(/\s+/g, " ").substring(0, 20);
     let systemMsg = '';
     if (replyTo) {
         systemMsg = `[system: ${myName}回复了${replyTo}在${char.realName}的动态“${momentSnippet}...”下的评论：${text}]`;

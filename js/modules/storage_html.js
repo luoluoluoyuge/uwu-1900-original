@@ -45,6 +45,7 @@ function injectStorageHTML() {
                     <span>备份选项</span>
                     <button class="storage-select-all-btn" id="storage-select-all-btn">全不选</button>
                 </div>
+                <div class="storage-size-note" style="padding:10px 16px;font-size:12px;line-height:1.5;color:#666;background:#fff;">这里显示的是压缩前的数据量估算，不等于最终备份文件大小；导出的 .ee 文件会使用 gzip 压缩，完成后会提示实际文件大小。</div>
                 <div id="storage-backup-options">
                     <!-- JS 动态注入选项 -->
                 </div>

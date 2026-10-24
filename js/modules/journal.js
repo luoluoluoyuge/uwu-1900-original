@@ -22,6 +22,11 @@ function setupMemoryJournalScreen() {
     const batchDeleteBtn = document.getElementById('journal-batch-delete-btn');
     const mergeBtn = document.getElementById('journal-merge-btn');
     const selectCountSpan = document.getElementById('journal-select-count');
+    const selectAllBtn = document.getElementById('journal-select-all-btn');
+    const exportTxtBtn = document.getElementById('journal-export-txt-btn');
+    const exportUwuBtn = document.getElementById('journal-export-uwu-btn');
+    const importBtn = document.getElementById('journal-import-btn');
+    const importInput = document.getElementById('journal-import-input');
 
     let isMultiSelectMode = false;
     let selectedJournalIds = new Set();
@@ -62,6 +67,100 @@ function setupMemoryJournalScreen() {
                 return;
             }
             await mergeJournals(Array.from(selectedJournalIds));
+        });
+    }
+
+    function getCurrentJournalChat() {
+        return (currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId);
+    }
+
+    // 导出对象：有勾选则导出勾选的，没勾选则导出全部
+    function getJournalsToExport() {
+        const chat = getCurrentJournalChat();
+        if (!chat || !Array.isArray(chat.memoryJournals)) return { chat, list: [], all: true };
+        const sorted = [...chat.memoryJournals].sort((a, b) => a.createdAt - b.createdAt);
+        if (selectedJournalIds.size === 0) return { chat, list: sorted, all: true };
+        return { chat, list: sorted.filter(j => selectedJournalIds.has(j.id)), all: false };
+    }
+
+    function downloadJournalFile(content, mime, filename) {
+        const blob = new Blob([content], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            const cards = journalListContainer.querySelectorAll('.journal-card[data-id]');
+            const allSelected = cards.length > 0 && selectedJournalIds.size === cards.length;
+            selectedJournalIds.clear();
+            cards.forEach(card => {
+                const box = card.querySelector('.journal-checkbox');
+                if (!allSelected) {
+                    selectedJournalIds.add(card.dataset.id);
+                    if (box) box.classList.add('checked');
+                } else if (box) {
+                    box.classList.remove('checked');
+                }
+            });
+            updateSelectCount();
+        });
+    }
+
+    if (exportTxtBtn) {
+        exportTxtBtn.addEventListener('click', () => {
+            const { chat, list, all } = getJournalsToExport();
+            if (!chat || list.length === 0) { showToast('没有可导出的日记'); return; }
+            const text = list.map(j => {
+                const d = new Date(j.createdAt);
+                const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                return `【${j.title}】\n${date}\n\n${j.content}`;
+            }).join('\n\n==========\n\n');
+            const name = String(chat.remarkName || chat.realName || chat.name || '日记').replace(/[\\/:*?"<>|\s]+/g, '_');
+            downloadJournalFile(text, 'text/plain;charset=utf-8', `uwu_journal_${name}.txt`);
+            showToast(all ? `已导出全部 ${list.length} 篇（TXT）` : `已导出 ${list.length} 篇（TXT）`);
+        });
+    }
+
+    if (exportUwuBtn) {
+        exportUwuBtn.addEventListener('click', () => {
+            const { chat, list, all } = getJournalsToExport();
+            if (!chat || list.length === 0) { showToast('没有可导出的日记'); return; }
+            const payload = {
+                type: 'uwu-journals', version: 1, exportedAt: Date.now(),
+                source: { name: chat.remarkName || chat.realName || chat.name || '', chatType: currentChatType },
+                journals: list.map(j => ({
+                    title: j.title, content: j.content, createdAt: j.createdAt,
+                    isFavorited: !!j.isFavorited,
+                    range: j.range ? { start: j.range.start, end: j.range.end } : null
+                }))
+            };
+            const name = String(chat.remarkName || chat.realName || chat.name || '日记').replace(/[\\/:*?"<>|\s]+/g, '_');
+            downloadJournalFile(JSON.stringify(payload, null, 2), 'application/json', `uwu_journal_${name}.json`);
+            showToast(all ? `已导出全部 ${list.length} 篇（UWU格式）` : `已导出 ${list.length} 篇（UWU格式）`);
+        });
+    }
+
+    if (importBtn && importInput) {
+        importBtn.addEventListener('click', () => { importInput.value = ''; importInput.click(); });
+        importInput.addEventListener('change', async () => {
+            const file = importInput.files && importInput.files[0];
+            if (!file) return;
+            try {
+                const result = await importJournalsFromText(await file.text());
+                toggleMultiSelectMode(false);
+                renderJournalList();
+                showToast(`已导入 ${result.added} 篇${result.skipped ? `，跳过重复 ${result.skipped} 篇` : ''}`);
+            } catch (err) {
+                showToast(err && err.message ? err.message : '导入失败');
+            }
+            importInput.value = '';
         });
     }
 
@@ -111,13 +210,14 @@ function setupMemoryJournalScreen() {
         // 1. 获取选中的日记对象并排序
         const selectedJournals = chat.memoryJournals
             .filter(j => journalIds.includes(j.id))
-            .sort((a, b) => a.range.start - b.range.start); // 按消息范围起始排序
+            .sort((a, b) => (a.range && b.range) ? (a.range.start - b.range.start) : (a.createdAt - b.createdAt)); // 按消息范围起始排序（导入的日记无范围则按创建时间）
 
         if (selectedJournals.length === 0) return;
 
         // 2. 计算合并后的范围
-        const mergedStart = selectedJournals[0].range.start;
-        const mergedEnd = selectedJournals[selectedJournals.length - 1].range.end;
+        const hasRange = selectedJournals.every(j => j.range && Number.isFinite(Number(j.range.start)));
+        const mergedStart = hasRange ? Math.min(...selectedJournals.map(j => j.range.start)) : null;
+        const mergedEnd = hasRange ? Math.max(...selectedJournals.map(j => j.range.end)) : null;
 
         // 3. 拼接内容
         const combinedContent = selectedJournals.map(j => `【${j.title}】\n${j.content}`).join('\n\n---\n\n');
@@ -193,9 +293,10 @@ function setupMemoryJournalScreen() {
 
             const newJournal = {
                 id: `journal_${Date.now()}`,
-                range: { start: mergedStart, end: mergedEnd },
-                startMessageId: chat.history[mergedStart - 1]?.id || null,
-                endMessageId: chat.history[mergedEnd - 1]?.id || null,
+                range: hasRange ? { start: mergedStart, end: mergedEnd } : null,
+                imported: !hasRange,
+                startMessageId: hasRange ? (chat.history[mergedStart - 1]?.id || null) : null,
+                endMessageId: hasRange ? (chat.history[mergedEnd - 1]?.id || null) : null,
                 title: parsedTitle,
                 content: parsedContent,
                 createdAt: Date.now(),
@@ -280,7 +381,7 @@ function setupMemoryJournalScreen() {
         showToast('日记风格设置已保存');
     });
 
-    generateNewJournalBtn.addEventListener('click', () => {
+    function openManualJournalModal() {
         const chat = (currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId);
         const totalMessages = chat ? chat.history.length : 0;
         
@@ -294,7 +395,21 @@ function setupMemoryJournalScreen() {
 
         generateJournalForm.reset();
         generateJournalModal.classList.add('visible');
+    }
+
+    // “+”号：先弹出小列表（手动总结 / 自动总结）
+    const journalAddMenu = document.getElementById('journal-add-menu');
+    generateNewJournalBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (journalAddMenu) journalAddMenu.style.display = journalAddMenu.style.display === 'none' ? 'block' : 'none';
+        else openManualJournalModal();
     });
+    document.addEventListener('click', () => {
+        if (journalAddMenu) journalAddMenu.style.display = 'none';
+    });
+    document.getElementById('journal-menu-manual')?.addEventListener('click', openManualJournalModal);
+    document.getElementById('journal-menu-auto')?.addEventListener('click', openAutoJournalModal);
+    setupAutoJournalModal();
 
     generateJournalForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -375,7 +490,7 @@ function setupMemoryJournalScreen() {
         editDetailBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.13,5.12L18.88,8.87M3,17.25V21H6.75L17.81,9.94L14.06,6.19L3,17.25Z" /></svg>`;
 
         titleEl.textContent = journal.title;
-        document.getElementById('journal-detail-meta').textContent = `创建于 ${formattedDate} | 消息范围: ${journal.range.start}-${journal.range.end}`;
+        document.getElementById('journal-detail-meta').textContent = `创建于 ${formattedDate}${journal.range ? ` | 消息范围: ${journal.range.start}-${journal.range.end}` : ' | 导入的日记'}`;
         document.getElementById('journal-detail-content').textContent = journal.content;
         
         switchScreen('memory-journal-detail-screen');
@@ -495,7 +610,7 @@ function renderJournalList() {
             </div>
             <div class="journal-card-footer" style="justify-content: space-between; height: auto; opacity: 1; margin-top: 10px;">
                 <span class="journal-card-date">${formattedDate}</span>
-                <span class="journal-card-range">范围: ${journal.range.start}-${journal.range.end}</span>
+                <span class="journal-card-range">${journal.range ? `范围: ${journal.range.start}-${journal.range.end}` : '导入'}</span>
             </div>
         `;
 
@@ -507,34 +622,39 @@ function renderJournalList() {
     });
 }
 
-async function generateJournal(start, end, includeFavorited = false) {
-    showToast('正在生成日记，请稍候...');
+async function generateJournal(start, end, includeFavorited = false, opts = {}) {
+    const auto = !!opts.auto;
+    showToast(auto ? '正在自动总结日记...' : '正在生成日记，请稍候...');
     
     // 显示列表占位卡片
     const container = document.getElementById('journal-list-container');
     const placeholder = document.getElementById('no-journals-placeholder');
-    if (placeholder) placeholder.style.display = 'none';
+    if (!auto && placeholder) placeholder.style.display = 'none';
 
-    const loadingCard = document.createElement('li');
-    loadingCard.className = 'journal-card generating';
-    loadingCard.id = 'journal-generating-card';
-    loadingCard.innerHTML = `
-        <div class="spinner"></div>
-        <div class="text">正在${currentChatType === 'group' ? '总结群聊' : '编织回忆'}...</div>
-    `;
-    
-    if (container.firstChild) {
-        container.insertBefore(loadingCard, container.firstChild);
-    } else {
-        container.appendChild(loadingCard);
+    if (!auto) {
+        const loadingCard = document.createElement('li');
+        loadingCard.className = 'journal-card generating';
+        loadingCard.id = 'journal-generating-card';
+        loadingCard.innerHTML = `
+            <div class="spinner"></div>
+            <div class="text">正在${currentChatType === 'group' ? '总结群聊' : '编织回忆'}...</div>
+        `;
+        
+        if (container.firstChild) {
+            container.insertBefore(loadingCard, container.firstChild);
+        } else {
+            container.appendChild(loadingCard);
+        }
+        container.scrollTop = 0;
+
+        isGenerating = true; 
+        generatingChatId = currentChatId;
     }
-    container.scrollTop = 0;
-
-    isGenerating = true; 
-    generatingChatId = currentChatId;
 
     try {
-        const chat = (currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId);
+        const chat = auto ? opts.chat : ((currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId));
+        const chatType = auto ? opts.chatType : currentChatType;
+        const chatIdForJournal = auto ? opts.chatId : currentChatId;
         if (!chat) {
             throw new Error("未找到当前聊天。");
         }
@@ -581,7 +701,7 @@ async function generateJournal(start, end, includeFavorited = false) {
             }
         }
 
-        if (currentChatType === 'group') {
+        if (chatType === 'group') {
             // 群聊逻辑
             const worldBooksLimitBreak = (chat.worldBookIds || []).map(id => db.worldBooks.find(wb => wb.id === id && wb.position === 'limit_break')).filter(Boolean).sort((a, b) => (a.depth || 100) - (b.depth || 100));
             const worldBooksBefore = (chat.worldBookIds || []).map(id => db.worldBooks.find(wb => wb.id === id && wb.position === 'before')).filter(Boolean).sort((a, b) => (a.depth || 100) - (b.depth || 100));
@@ -784,8 +904,8 @@ async function generateJournal(start, end, includeFavorited = false) {
             title: parsedTitle,
             content: parsedContent,
             createdAt: Date.now(),
-            chatId: currentChatId,
-            chatType: currentChatType,
+            chatId: chatIdForJournal,
+            chatType: chatType,
             isFavorited: false 
         };
 
@@ -795,10 +915,21 @@ async function generateJournal(start, end, includeFavorited = false) {
         chat.memoryJournals.push(newJournal);
         await saveData();
 
+        if (auto) {
+            if (typeof currentChatId !== 'undefined' && currentChatId === chatIdForJournal && document.getElementById('memory-journal-screen')?.classList.contains('active')) renderJournalList();
+            showToast('自动总结完成');
+            return true;
+        }
         renderJournalList();
         showToast('新日记已生成！');
+        return true;
 
     } catch (error) {
+        if (auto) {
+            console.error('自动总结失败:', error);
+            showToast('自动总结失败：' + String((error && error.message) || '未知错误').slice(0, 40) + '，下次回复后会重试');
+            return false;
+        }
         // 移除生成卡片
         const card = document.getElementById('journal-generating-card');
         if(card) card.remove();
@@ -812,8 +943,10 @@ async function generateJournal(start, end, includeFavorited = false) {
 
         showApiError(error);
     } finally {
-        isGenerating = false; 
-        generatingChatId = null;
+        if (!auto) {
+            isGenerating = false; 
+            generatingChatId = null;
+        }
     }
 }
 
@@ -853,4 +986,134 @@ function migrateJournalSettings(chat) {
         return migrationMsg;
     }
     return null;
+}
+
+// 导入 UWU 格式日记（纯函数式校验 + 写入当前聊天）。导入的日记不带楼数范围，避免与当前聊天对不上。
+async function importJournalsFromText(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error('文件不是有效的 UWU 日记文件'); }
+    if (!data || data.type !== 'uwu-journals' || !Array.isArray(data.journals)) {
+        throw new Error('不是 UWU 日记文件');
+    }
+    const chat = (currentChatType === 'private') ? db.characters.find(c => c.id === currentChatId) : db.groups.find(g => g.id === currentChatId);
+    if (!chat) throw new Error('找不到当前聊天');
+    if (!Array.isArray(chat.memoryJournals)) chat.memoryJournals = [];
+    const seen = new Set(chat.memoryJournals.map(j => `${j.title}\u0000${j.content}`));
+    let added = 0, skipped = 0;
+    const base = Date.now();
+    data.journals.forEach((j, i) => {
+        if (!j || typeof j.title !== 'string' || typeof j.content !== 'string' || !j.content.trim()) { skipped++; return; }
+        const key = `${j.title}\u0000${j.content}`;
+        if (seen.has(key)) { skipped++; return; }
+        seen.add(key);
+        const t = Number(j.createdAt);
+        chat.memoryJournals.push({
+            id: `journal_${base}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+            range: null,
+            imported: true,
+            startMessageId: null,
+            endMessageId: null,
+            title: j.title.slice(0, 200),
+            content: j.content,
+            createdAt: Number.isFinite(t) && t > 0 ? t : base + i,
+            chatId: currentChatId,
+            chatType: currentChatType,
+            isFavorited: !!j.isFavorited
+        });
+        added++;
+    });
+    if (added === 0 && skipped === 0) throw new Error('文件里没有日记');
+    await saveData();
+    return { added, skipped };
+}
+
+
+// ===== 日记自动总结 =====
+// 规则：按“总消息数”的整倍数触发。例如每 20 条一次、当前 150 条 → 下一次在 160 条（总结 141–160），而不是 170。
+let autoJournalRunning = false;
+
+function getJournalChatById(chatId, chatType) {
+    return chatType === 'private' ? db.characters.find(c => c.id === chatId) : db.groups.find(g => g.id === chatId);
+}
+
+function getAutoJournalInterval(cfg) {
+    const n = parseInt(cfg && cfg.interval, 10);
+    return Number.isFinite(n) && n >= 5 ? n : 20;
+}
+
+function openAutoJournalModal() {
+    const chat = getJournalChatById(currentChatId, currentChatType);
+    if (!chat) return;
+    const cfg = chat.journalAutoSummary || {};
+    document.getElementById('journal-auto-enabled').checked = !!cfg.enabled;
+    document.getElementById('journal-auto-interval').value = cfg.interval || 20;
+    document.getElementById('journal-auto-favorited').checked = !!cfg.includeFavorited;
+    const total = (chat.history || []).length;
+    const n = getAutoJournalInterval(cfg);
+    const next = (Math.floor(total / n) + 1) * n;
+    document.getElementById('journal-auto-info').textContent = `当前共 ${total} 条消息，按总条数的整倍数触发，下一次约在第 ${next} 条。`;
+    const sec = db.apiSettings && db.apiSettings.secondary;
+    const useSec = !!(sec && sec.enabled && sec.routes && sec.routes.journal);
+    document.getElementById('journal-auto-api-tip').textContent = useSec ? '当前使用：副 API（已勾选日记）' : '当前使用：主 API（如需副 API，请在副 API 设置中勾选日记）';
+    document.getElementById('journal-auto-modal').classList.add('visible');
+}
+
+function setupAutoJournalModal() {
+    const modal = document.getElementById('journal-auto-modal');
+    const form = document.getElementById('journal-auto-form');
+    if (!modal || !form) return;
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('visible'); });
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const chat = getJournalChatById(currentChatId, currentChatType);
+        if (!chat) return;
+        const enabled = document.getElementById('journal-auto-enabled').checked;
+        const interval = parseInt(document.getElementById('journal-auto-interval').value, 10);
+        if (!Number.isFinite(interval) || interval < 5) {
+            showToast('条数请填写不小于 5 的整数');
+            return;
+        }
+        const prev = chat.journalAutoSummary || {};
+        const total = (chat.history || []).length;
+        const cfg = {
+            enabled,
+            interval,
+            includeFavorited: document.getElementById('journal-auto-favorited').checked,
+            lastEnd: prev.lastEnd
+        };
+        // 刚开启或修改条数时，以当前总条数向下取整的整倍数作为起点
+        if (enabled && (!prev.enabled || prev.interval !== interval || !Number.isFinite(cfg.lastEnd))) {
+            cfg.lastEnd = Math.floor(total / interval) * interval;
+        }
+        chat.journalAutoSummary = cfg;
+        await saveData();
+        modal.classList.remove('visible');
+        showToast(enabled ? `已开启：每 ${interval} 条自动总结（下次在第 ${(Math.floor(total / interval) + 1) * interval} 条）` : '已关闭自动总结');
+    });
+}
+
+async function maybeAutoSummarizeJournal(chatId, chatType) {
+    if (autoJournalRunning) return;
+    const chat = getJournalChatById(chatId, chatType);
+    const cfg = chat && chat.journalAutoSummary;
+    if (!cfg || !cfg.enabled) return;
+    const n = getAutoJournalInterval(cfg);
+    const total = (chat.history || []).length;
+    let lastEnd = Number.isFinite(cfg.lastEnd) ? cfg.lastEnd : Math.floor(total / n) * n;
+    if (lastEnd > total) lastEnd = Math.floor(total / n) * n; // 消息被删减后重新对齐
+    const boundary = Math.floor(total / n) * n;
+    if (boundary <= lastEnd) {
+        if (lastEnd !== cfg.lastEnd) { cfg.lastEnd = lastEnd; await saveData(); }
+        return;
+    }
+    autoJournalRunning = true;
+    try {
+        const ok = await generateJournal(lastEnd + 1, boundary, !!cfg.includeFavorited, { auto: true, chat, chatId, chatType });
+        if (ok) {
+            cfg.lastEnd = boundary;
+            await saveData();
+        }
+    } finally {
+        autoJournalRunning = false;
+    }
 }

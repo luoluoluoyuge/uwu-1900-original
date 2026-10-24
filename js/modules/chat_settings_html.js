@@ -139,6 +139,7 @@ const chatSettingsHtml = `
                                 <div class="kkt-item-control">
                                     <select id="setting-bilingual-style" style="border:none; background:transparent; text-align:right;">
                                         <option value="under">气泡外 (默认)</option>
+                                        <option value="under-auto">气泡外 (自动显示)</option>
                                         <option value="inner">气泡内</option>
                                         <option value="inner-no-line">气泡内 (无分割线)</option>
                                     </select>
@@ -162,6 +163,59 @@ const chatSettingsHtml = `
                                     <span style="color:#999;">-</span>
                                     <input type="number" id="setting-reply-count-max" value="8" min="1" style="width:30px; text-align:center; border:none; background: rgba(0,0,0,0.05); border-radius: 4px;">
                                 </div>
+                            </div>
+                            <div class="kkt-item">
+                                <div class="kkt-item-label">表情包匹配</div>
+                                <div class="kkt-item-control">
+                                    <label class="kkt-switch">
+                                        <input type="checkbox" id="setting-sticker-match-enabled">
+                                        <span class="kkt-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="kkt-item" id="setting-sticker-match-position-container" style="display:none; flex-direction:column; align-items:stretch; gap:8px;">
+                                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                                    <div class="kkt-item-label">匹配弹窗位置</div>
+                                    <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:#999;">
+                                        <span><span id="setting-sticker-match-position-value">0</span>px</span>
+                                        <button type="button" id="setting-sticker-match-position-reset" class="btn" style="padding:3px 8px; border-radius:7px; font-size:11px;">重置</button>
+                                    </div>
+                                </div>
+                                <input type="range" id="setting-sticker-match-position" class="settings-range-slider" min="-100" max="220" step="4" value="0" style="width: 100%; accent-color: var(--primary-color);">
+                                <div style="font-size:11px; color:#aaa; text-align:center; margin-top:-2px;">向上为正，向下为负</div>
+                            </div>
+                            <div class="kkt-item">
+                                <div class="kkt-item-label">拍一拍</div>
+                                <div class="kkt-item-control">
+                                    <label class="kkt-switch">
+                                        <input type="checkbox" id="setting-pat-enabled">
+                                        <span class="kkt-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="setting-pat-container" style="display:none; flex-direction:column; align-items:stretch;">
+                                <div class="kkt-item">
+                                    <div class="kkt-item-label">我的后缀</div>
+                                    <div class="kkt-item-control">
+                                        <input type="text" id="setting-pat-my-suffix" maxlength="20" autocomplete="off" style="text-align:right; border:none; background:transparent;" placeholder="如：的脑袋（TA拍我时显示）">
+                                    </div>
+                                </div>
+                                <div class="kkt-item">
+                                    <div class="kkt-item-label">TA的后缀</div>
+                                    <div class="kkt-item-control">
+                                        <input type="text" id="setting-pat-char-suffix" maxlength="20" autocomplete="off" style="text-align:right; border:none; background:transparent;" placeholder="如：的脑袋（我拍TA时显示）">
+                                    </div>
+                                </div>
+                                <div class="kkt-item">
+                                    <div class="kkt-item-label">允许 TA 自己修改后缀</div>
+                                    <div class="kkt-item-control">
+                                        <label class="kkt-switch">
+                                            <input type="checkbox" id="setting-pat-ai-suffix">
+                                            <span class="kkt-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div style="font-size:11px; color:#aaa; padding:0 15px 10px; line-height:1.5;">双击聊天里 TA 的头像即可拍一拍。后缀留空则只显示“拍了拍”。</div>
                             </div>
                         </div>
 
@@ -329,6 +383,30 @@ const chatSettingsHtml = `
                                         <div class="kkt-item-control">
                                             <input type="number" id="setting-auto-reply-interval" value="60" min="1" style="width:50px; text-align:right; border:none; background: #f5f5f5; border-radius: 4px; padding: 4px;">
                                         </div>
+                                    </div>
+                                    <div class="kkt-item">
+                                        <div class="kkt-item-label">安静时段（不主动发消息）</div>
+                                        <div class="kkt-item-control">
+                                            <label class="kkt-switch">
+                                                <input type="checkbox" id="setting-quiet-hours-enabled">
+                                                <span class="kkt-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div id="quiet-hours-detail" style="display:none;">
+                                        <div class="kkt-item">
+                                            <div class="kkt-item-label">开始时间</div>
+                                            <div class="kkt-item-control"><input type="time" id="setting-quiet-hours-start" value="00:00" style="border:none; background:#f5f5f5; border-radius:4px; padding:4px;"></div>
+                                        </div>
+                                        <div class="kkt-item">
+                                            <div class="kkt-item-label">结束时间</div>
+                                            <div class="kkt-item-control"><input type="time" id="setting-quiet-hours-end" value="08:00" style="border:none; background:#f5f5f5; border-radius:4px; padding:4px;"></div>
+                                        </div>
+                                        <div class="kkt-item">
+                                            <div class="kkt-item-label">时区</div>
+                                            <div class="kkt-item-control"><select id="setting-quiet-hours-tz" style="border:none; background:#f5f5f5; border-radius:4px; padding:4px; max-width:170px;"><option value="">跟随设备时区</option><option value="Asia/Shanghai">北京时间 (UTC+8)</option><option value="Asia/Hong_Kong">香港 (UTC+8)</option><option value="Asia/Taipei">台北 (UTC+8)</option><option value="Asia/Singapore">新加坡 (UTC+8)</option><option value="Asia/Tokyo">东京 (UTC+9)</option><option value="Asia/Seoul">首尔 (UTC+9)</option><option value="Australia/Sydney">悉尼</option><option value="Asia/Dubai">迪拜 (UTC+4)</option><option value="Asia/Kolkata">印度 (UTC+5:30)</option><option value="Europe/Moscow">莫斯科 (UTC+3)</option><option value="Europe/Paris">巴黎／柏林</option><option value="Europe/London">伦敦</option><option value="America/Sao_Paulo">圣保罗 (UTC-3)</option><option value="America/New_York">纽约 (美东)</option><option value="America/Chicago">芝加哥 (美中)</option><option value="America/Denver">丹佛 (美山地)</option><option value="America/Los_Angeles">洛杉矶 (美西)</option><option value="Pacific/Auckland">奥克兰</option><option value="UTC">UTC</option></select></div>
+                                        </div>
+                                        <div style="font-size:12px; color:#999; padding:2px 16px 8px;">此时段内不会主动发送消息（含云端后台）。开始晚于结束表示跨天，如 23:00–07:00。</div>
                                     </div>
                                 </div>
                             </div>

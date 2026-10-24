@@ -287,6 +287,92 @@ async function setupWorldBookApp() {
         document.querySelector('input[name="world-book-position"][value="before"]').checked = true;
         switchScreen('edit-world-book-screen');
     });
+
+    // 导入 TXT / Word(DOC/DOCX) / JSON 文档为世界书条目
+    const wbDocumentImportInput = document.getElementById('wb-document-import-input');
+    const wbImportDocumentBtn = document.getElementById('wb-menu-import-document');
+    const getFileBaseName = (name) => name.replace(/\.[^.]+$/, '') || '导入文档';
+
+    const normalizeImportedJsonEntries = (data, fallbackName) => {
+        const source = Array.isArray(data) ? data : (Array.isArray(data?.entries) ? data.entries : (Array.isArray(data?.worldBooks) ? data.worldBooks : null));
+        if (source) {
+            return source.map((item, index) => {
+                const name = String(item?.name || item?.title || `${fallbackName} ${index + 1}`).trim();
+                let content = item?.content ?? item?.text ?? item?.description ?? '';
+                if (typeof content !== 'string') content = JSON.stringify(content, null, 2);
+                return { name: name || `${fallbackName} ${index + 1}`, content: String(content) };
+            }).filter(item => item.content.trim());
+        }
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+            if (data.name || data.title || data.content || data.text || data.description) {
+                let content = data.content ?? data.text ?? data.description ?? '';
+                if (typeof content !== 'string') content = JSON.stringify(content, null, 2);
+                return [{ name: String(data.name || data.title || fallbackName), content: String(content) }].filter(item => item.content.trim());
+            }
+        }
+        return [{ name: fallbackName, content: JSON.stringify(data, null, 2) }];
+    };
+
+    const importWorldBookDocument = async (file) => {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        const baseName = getFileBaseName(file.name);
+        let entries = [];
+        try {
+            if (ext === 'txt') {
+                entries = [{ name: baseName, content: await file.text() }];
+            } else if (ext === 'docx') {
+                if (typeof mammoth === 'undefined') throw new Error('缺少 Word 文档解析库');
+                const buffer = await file.arrayBuffer();
+                const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                entries = [{ name: baseName, content: result.value || '' }];
+            } else if (ext === 'doc') {
+                throw new Error('旧版 .doc 为二进制格式，当前请将其另存为 .docx 后再导入');
+            } else if (ext === 'json') {
+                const text = await file.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { throw new Error('JSON 格式不正确'); }
+                entries = normalizeImportedJsonEntries(data, baseName);
+            } else {
+                throw new Error('不支持的文档格式');
+            }
+
+            entries = entries.map(item => ({ name: String(item.name || baseName).trim(), content: String(item.content || '').trim() })).filter(item => item.name && item.content);
+            if (!entries.length) throw new Error('文档没有可导入的内容');
+
+            const currentFolderId = wbPathStack[wbPathStack.length - 1].id;
+            const now = Date.now();
+            entries.forEach((entry, index) => {
+                db.worldBooks.push({
+                    id: `wb_import_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+                    parentId: currentFolderId,
+                    type: 'entry',
+                    name: entry.name,
+                    content: entry.content,
+                    position: 'before',
+                    category: '',
+                    depth: 100
+                });
+            });
+            await saveData();
+            renderWorldBookList();
+            showToast(`已导入 ${entries.length} 个世界书条目`);
+        } catch (error) {
+            console.error('世界书文档导入失败:', error);
+            showToast(`导入失败：${error.message}`);
+        }
+    };
+
+    if (wbImportDocumentBtn && wbDocumentImportInput) {
+        wbImportDocumentBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            wbDocumentImportInput.value = '';
+            wbDocumentImportInput.click();
+        });
+        wbDocumentImportInput.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (file) await importWorldBookDocument(file);
+        });
+    }
     
     editWorldBookForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -338,9 +424,10 @@ async function setupWorldBookApp() {
             // 在多选模式下：
             // 1. 如果点击的是图标区域，或者是条目，则切换选中状态
             // 2. 如果点击的是文件夹的其他区域（如名称），则进入文件夹进行导航
-            if (e.target.closest('.wb-icon-wrapper') || item.type === 'entry') {
+            if (item.type === 'entry') {
                 toggleWorldBookSelection(id);
             } else if (item.type === 'folder') {
+                // 文件夹只能用于进入/作为移动目标，绝不进入多选集合
                 wbPathStack.push({ id: item.id, name: item.name });
                 renderWorldBookList();
             }
@@ -376,7 +463,10 @@ async function setupWorldBookApp() {
     let wbLongPressTimer;
     worldBookListContainer.addEventListener('touchstart', (e) => {
         const item = e.target.closest('.wb-item-card');
-        if (!item) return;
+        if (!item || isWorldBookMultiSelectMode) return;
+        const worldBookItem = db.worldBooks.find(wb => wb.id === item.dataset.id);
+        // 文件夹不允许通过长按进入多选，只有世界书条目可以
+        if (!worldBookItem || worldBookItem.type !== 'entry') return;
         wbLongPressTimer = setTimeout(() => {
             enterWorldBookMultiSelectMode(item.dataset.id);
         }, 600);
@@ -402,7 +492,10 @@ function renderWorldBookList() {
             return !item.parentId;
         }
         return item.parentId === currentFolder.id;
-    });
+    }).map((item, idx) => ({ item, idx }))
+      // 文件夹排在最前面，同类保持原有顺序
+      .sort((a, b) => ((a.item.type === 'folder' ? 0 : 1) - (b.item.type === 'folder' ? 0 : 1)) || (a.idx - b.idx))
+      .map(x => x.item);
 
     document.getElementById('no-world-books-placeholder').style.display = currentItems.length === 0 ? 'block' : 'none';
     container.innerHTML = '';
@@ -551,7 +644,9 @@ function renderWorldBookSelectorList() {
             return !item.parentId;
         }
         return item.parentId === currentFolder.id;
-    });
+    }).map((item, idx) => ({ item, idx }))
+      .sort((a, b) => ((a.item.type === 'folder' ? 0 : 1) - (b.item.type === 'folder' ? 0 : 1)) || (a.idx - b.idx))
+      .map(x => x.item);
 
     container.innerHTML = '';
 

@@ -322,8 +322,14 @@ function handleChatListLongPress(chatId, chatType, x, y) {
             action: async () => {
                 if (confirm(`确定要删除与“${itemName}”的聊天记录吗？此操作不可恢复。`)) {
                     if (chatType === 'private') {
+                        const deletedChat = db.characters.find(c => c.id === chatId);
                         await dexieDB.characters.delete(chatId);
                         db.characters = db.characters.filter(c => c.id !== chatId);
+                        // 开了自动消息的聊天被删除后，Worker 不能继续替它发主动消息。
+                        if (deletedChat && (deletedChat.autoReply?.enabled || deletedChat.autoReplySyncPending)) {
+                            try { await window.UwUBackendAdapter?.stopDeletedChat?.(deletedChat); }
+                            catch (error) { console.warn('[UwUBackend] 通知云端停止已删除聊天失败，下次启动重试:', error); }
+                        }
                     } else {
                         await dexieDB.groups.delete(chatId);
                         db.groups = db.groups.filter(g => g.id !== chatId);
@@ -371,9 +377,9 @@ function renderChatList() {
         if (chat.history && chat.history.length > 0) {
             let invisibleRegex;
             if (chat.showStatusUpdateMsg) {
-                invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?已接收礼物\]|\[system:.*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:.*?\]/;
+                invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?已接收礼物\]|\[system:[\s\S]*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:[\s\S]*?\]|\[.*?更新了?拍一拍后缀为[：:].*?\]/;
             } else {
-                invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?更新状态为：.*?\]|\[.*?已接收礼物\]|\[system:.*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:.*?\]/;
+                invisibleRegex = /\[.*?(?:接收|退回).*?的转账\]|\[.*?更新状态为：.*?\]|\[.*?已接收礼物\]|\[system:[\s\S]*?\]|\[.*?邀请.*?加入了群聊\]|\[.*?修改群名为：.*?\]|\[system-display:[\s\S]*?\]|\[.*?更新了?拍一拍后缀为[：:].*?\]/;
             }
             const visibleHistory = chat.history.filter(msg => !invisibleRegex.test(msg.content));
             if (visibleHistory.length > 0) {
@@ -386,7 +392,15 @@ function renderChatList() {
                 const stickerRegex = /\[.*?的表情包：.*?\]|\[.*?发送的表情包：.*?\]/;
                 const giftRegex = /\[.*?送来的礼物：.*?\]|\[.*?向.*?送来了礼物：.*?\]/;
 
-                if (giftRegex.test(lastMsg.content)) {
+                if (lastMsg.qn) {
+                    lastMessageText = `[问卷] ${lastMsg.qn.title || ''}`;
+                } else if (/^\[[^\[\]：:]{1,40}?(?:回答了?|填写了?|填寫了?|作答了?|完成了)[问問]卷/.test(lastMsg.content.trim())) {
+                    lastMessageText = '[问卷回答]';
+                } else if (lastMsg.vote) {
+                    lastMessageText = `[投票] ${lastMsg.vote.title || ''}`;
+                } else if (/^\[[^\[\]：:]{1,40}?拍了拍[^\[\]：:]{1,40}?(?:[：:][^\[\]]{0,30})?\]$/.test(lastMsg.content.trim())) {
+                    lastMessageText = '[拍一拍]';
+                } else if (giftRegex.test(lastMsg.content)) {
                     lastMessageText = '[礼物]';
                 } else if (stickerRegex.test(lastMsg.content)) {
                     lastMessageText = '[表情包]';
