@@ -58,6 +58,41 @@
     <!-- <link rel="stylesheet" href="style.css"> (Deprecated) -->
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+    <style id="quick-api-fixed-modal-style">
+        .quick-api-modal { overflow: hidden; }
+        .quick-api-modal-window { width: 420px !important; max-width: calc(100vw - 36px) !important; max-height: calc(100vh - 36px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box; background: var(--panel-bg,#fff); padding: 18px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.16); }
+        .quick-api-modal-window h3 { margin: 0 0 14px; font-size: 18px; color: var(--primary-color); }
+        .quick-api-preset-row, .quick-api-fields { width: 100%; box-sizing: border-box; }
+        .quick-api-preset-row { margin-bottom: 12px; }
+        .quick-api-preset-row select, .quick-api-field-row > select, .quick-api-field-row > input { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; }
+        .quick-api-preset-row select { padding: 9px 10px; border: 1px solid #e0e0e0; border-radius: 9px; background: #fafafa; font-size: 14px; }
+        .quick-api-fields { display: grid; gap: 9px; }
+        .quick-api-field-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
+        .quick-api-field-row label { width: 72px; min-width: 0; color: #666; font-size: 13px; }
+        .quick-api-field-row select, .quick-api-field-row input { padding: 9px; border: 1px solid #e0e0e0; border-radius: 9px; background: #fff; font-size: 13px; }
+        .quick-api-model-row { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 8px; }
+        .quick-api-model-row button { width: auto !important; min-width: 58px; padding: 8px 12px; white-space: nowrap; }
+        /* 「拉取」按钮和模型下拉框同高、同一水平线 */
+        .quick-api-model-row select, .quick-api-model-row button { height: 38px; box-sizing: border-box; margin: 0 !important; padding-top: 0; padding-bottom: 0; line-height: 1; }
+        .quick-api-model-row button { display: inline-flex; align-items: center; justify-content: center; padding-left: 14px; padding-right: 14px; }
+        .quick-api-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
+        .quick-api-actions button { width: auto !important; padding: 9px 18px; }
+        @media (max-width: 420px) {
+            .quick-api-modal { padding: 10px; }
+            .quick-api-modal-window { max-width: calc(100vw - 20px) !important; padding: 14px; }
+            .quick-api-field-row { grid-template-columns: 64px minmax(0, 1fr); }
+            .quick-api-field-row label { width: 64px; }
+            .quick-api-model-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+        }
+    </style>
+    <style id="moments-user-post-style">
+        /* 朋友圈顶栏的返回 / 相机按钮：不要灰色底圈（和微信一致） */
+        .moments-header .back-btn, .moments-header .action-btn,
+        .moments-header.scrolled .back-btn, .moments-header.scrolled .action-btn { background: transparent !important; }
+        #moments-refresh-btn { width: 44px !important; height: 44px !important; overflow: visible; }
+        #moments-refresh-btn svg { width: 40px !important; height: 40px !important; }
+    </style>
 </head>
 
 <body>
@@ -271,7 +306,9 @@
                 <div id="world-book-new-menu" class="world-book-new-menu" style="display: none;">
                     <div class="menu-item" id="wb-menu-new-folder">新建文件夹</div>
                     <div class="menu-item" id="wb-menu-new-entry">新建条目</div>
+                    <div class="menu-item" id="wb-menu-import-document">导入文档</div>
                 </div>
+                <input type="file" id="wb-document-import-input" accept=".txt,.doc,.docx,.json" style="display:none;">
             </div>
         </header>
         <main class="content" id="world-book-content-scroll">
@@ -452,16 +489,46 @@
                         </div>
                         <div class="kkt-item">
                             <div class="kkt-item-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <path d="M15 17V18C15 19.6569 13.6569 21 12 21C10.3431 21 9 19.6569 9 18V17.0001M15 17L9 17.0001M15 17H19C19.5523 17 20 16.5523 20 16V15.4141C20 15.1489 19.8945 14.8946 19.707 14.707L19.1963 14.1963C19.0706 14.0706 19 13.9 19 13.7222V10C19 9.82357 18.9936 9.64855 18.9805 9.4761M9 17.0001L5 17.0001C4.44772 17.0001 4 16.5521 4 15.9998V15.4141C4 15.1489 4.10544 14.8949 4.29297 14.7073L4.80371 14.1958C4.92939 14.0701 5 13.9002 5 13.7224V9.99998C5 6.13401 8.134 3 12 3C12.7116 3 13.3984 3.10618 14.0454 3.30357M18.9805 9.4761C20.1868 8.7873 21 7.48861 21 6C21 3.79086 19.2091 2 17 2C15.8298 2 14.7769 2.50253 14.0454 3.30357M18.9805 9.4761C18.3966 9.80949 17.7209 10 17 10C14.7909 10 13 8.20914 13 6C13 4.9611 13.3961 4.0147 14.0454 3.30357" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
                             </div>
                             <div class="kkt-item-content">
-                                <div class="kkt-item-title">持续运行增强</div>
-                                <div class="kkt-item-subtitle">提高 iOS/Android 后台存活率，系统仍可能暂停网页</div>
-                                <div class="kkt-item-subtitle" id="keep-alive-status" data-state="off">未开启</div>
+                                <div class="kkt-item-title">系统级通知</div>
+                                <div class="kkt-item-subtitle">收到新消息时显示系统通知，方便在后台快速看到并回复</div>
                             </div>
                             <div class="kkt-item-control">
                                 <label class="kkt-switch">
-                                    <input type="checkbox" id="keep-alive-switch">
+                                    <input type="checkbox" id="system-notification-switch">
+                                    <span class="kkt-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="kkt-item" id="system-notification-test-item" style="display:none;">
+                            <div class="kkt-item-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M15 17V18C15 19.6569 13.6569 21 12 21C10.3431 21 9 19.6569 9 18V17.0001M15 17L9 17.0001M15 17H19C19.5523 17 20 16.5521 20 16V15.4141C20 15.1489 19.8946 14.8946 19.7071 14.7071L19.1963 14.1963C19.0706 14.0706 19 13.9 19 13.7222V10C19 6.13401 15.866 3 12 3C8.13401 3 5 6.13401 5 10V13.7224C5 13.9002 4.92939 14.0701 4.80371 14.1958L4.29297 14.7073C4.10544 14.8949 4 15.1489 4 15.4141V16C4 16.5523 4.44772 17 5 17H9"/>
+                                </svg>
+                            </div>
+                            <div class="kkt-item-content">
+                                <div class="kkt-item-title">测试系统通知</div>
+                                <div class="kkt-item-subtitle">检查当前浏览器是否支持并允许系统通知</div>
+                            </div>
+                            <div class="kkt-item-control">
+                                <button type="button" class="btn btn-small btn-secondary" id="test-system-notification-btn" style="margin:0; padding:6px 12px; border-radius:20px;">测试</button>
+                            </div>
+                        </div>
+                        <div class="kkt-item">
+                            <div class="kkt-item-icon">
+                                <svg class="quick-api-settings-icon" viewBox="0 0 28 28" fill="currentColor" aria-hidden="true"><path d="M26,24 C26,25.087 25.087,26 24,26 L3.935,26.033 C2.848,26.033 1.967,25.152 1.967,24.065 L2,4 C2,2.913 2.913,2 4,2 L15,2 L15,0 L4,0 C1.827,0 0,2.221 0,4.394 L0,24.065 C0,26.238 1.762,28 3.935,28 L23.606,28 C25.779,28 28,26.173 28,24 L28,13 L26,13 L26,24 Z M26.979,0 L20,0 C19.433,0.001 19.001,0.459 19,1 C18.999,1.541 19.433,2.001 20,2 L24.395,1.968 L9.308,16.357 C8.908,16.738 8.908,17.355 9.308,17.736 C9.706,18.117 10.354,18.117 10.753,17.736 L25.971,3.222 L26,8 C25.999,8.541 26.433,9.001 27,9 C27.567,8.999 27.999,8.541 28,8 L28,0.975 C28.001,0.434 27.546,-0.001 26.979,0 Z"/></svg>
+                            </div>
+                            <div class="kkt-item-content">
+                                <div class="kkt-item-title">快速 API 设置</div>
+                                <div class="kkt-item-subtitle">开启后连续点击屏幕三次，可随时呼出快速切换 API / 模型面板</div>
+                            </div>
+                            <div class="kkt-item-control">
+                                <label class="kkt-switch">
+                                    <input type="checkbox" id="quick-api-settings-switch">
                                     <span class="kkt-slider"></span>
                                 </label>
                             </div>
@@ -498,7 +565,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div id="secondary-api-panel">
+                        <div id="secondary-api-panel" style="display:none;">
                             <div class="kkt-item">
                                 <div class="kkt-item-content"><div class="kkt-item-title">副 API 服务商</div></div>
                                 <div class="kkt-item-control">
@@ -542,6 +609,112 @@
                                     <label><input type="checkbox" data-secondary-route="peek"> 偷看手机</label>
                                     <label><input type="checkbox" data-secondary-route="shop"> 商城生成</label>
                                     <label><input type="checkbox" data-secondary-route="batteryReminder"> 低电量提醒</label>
+                                    <label><input type="checkbox" data-secondary-route="autoMessage"> 自动消息（主动消息）</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin: 16px 4px 8px; font-size: 13px; font-weight: 600; color: var(--primary-color, #007AFF);">保活功能：请择一使用</div>
+                    <div class="kkt-group" style="margin-top: 0;">
+                        <div class="kkt-item">
+                            <div class="kkt-item-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                            </div>
+                            <div class="kkt-item-content">
+                                <div class="kkt-item-title">持续运行增强</div>
+                                <div class="kkt-item-subtitle">使用原有音频保活方式，提高 iOS/Android 后台存活率；系统仍可能暂停网页</div>
+                                <div class="kkt-item-subtitle" id="keep-alive-status" data-state="off">未开启</div>
+                            </div>
+                            <div class="kkt-item-control">
+                                <label class="kkt-switch">
+                                    <input type="checkbox" id="keep-alive-switch">
+                                    <span class="kkt-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="kkt-item" style="flex-direction: column; align-items: stretch; padding-bottom: 16px;">
+                            <div style="display:flex;align-items:center;">
+                                <div class="kkt-item-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
+                                </div>
+                                <div class="kkt-item-content">
+                                    <div class="kkt-item-title">Cloudflare 后台消息服务</div>
+                                    <div class="kkt-item-subtitle">开启后不需要再开上方的持续运行增强</div>
+                                </div>
+                                <div class="kkt-item-control">
+                                    <label class="kkt-switch">
+                                        <input type="checkbox" id="backend-mode-switch">
+                                        <span class="kkt-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="backend-config-panel" style="display:none;margin-top:12px;">
+                                <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+                                    <button type="button" id="backend-tutorial-btn" style="border:0;background:none;padding:0;color:var(--primary-color,#8aa9c2);font-size:12px;cursor:pointer;">教程与注意事项</button>
+                                </div>
+                                <input id="backend-url-input" type="url" placeholder="Cloudflare Worker 地址，例如 https://xxx.workers.dev" style="width:100%;box-sizing:border-box;border:1px solid rgba(127,127,127,.2);border-radius:12px;background:transparent;padding:10px;font-size:14px;">
+                                <input id="backend-token-input" type="password" placeholder="必填：Cloudflare BACKEND_TOKEN" autocomplete="current-password" style="margin-top:8px;width:100%;box-sizing:border-box;border:1px solid rgba(127,127,127,.2);border-radius:12px;background:transparent;padding:10px;font-size:14px;">
+                                <div style="margin-top:5px;font-size:12px;opacity:.75;">必填；請填入 Cloudflare Production 的 BACKEND_TOKEN Secret，兩邊必須完全相同。</div>
+                                <div style="display:flex;gap:8px;margin-top:10px;">
+                                    <button type="button" class="btn btn-small btn-secondary" id="backend-test-btn" style="margin:0;flex:1;border-radius:20px;">测试后台</button>
+                                    <button type="button" class="btn btn-small btn-secondary" id="backend-push-btn" style="margin:0;flex:1;border-radius:20px;">注册后台通知</button>
+                                </div>
+                                <button type="button" class="btn btn-small btn-secondary" id="backend-push-test-btn" style="margin:8px 0 0;width:100%;border-radius:20px;">发送测试通知</button>
+                                <div id="backend-status" style="margin-top:8px;font-size:12px;color:var(--secondary-text-color,#888);">未连接</div>
+                            </div>
+                        </div>
+
+                        <div id="backend-tutorial-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.38);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
+                            <div style="width:min(420px,100%);max-height:78vh;overflow:auto;background:var(--card-background-color,#fff);color:var(--text-color,#333);border-radius:18px;padding:18px;box-sizing:border-box;box-shadow:0 10px 35px rgba(0,0,0,.22);">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+                                    <div style="font-size:16px;font-weight:600;">教程与注意事项</div>
+                                    <button type="button" id="backend-tutorial-close" style="border:0;background:none;font-size:22px;line-height:1;padding:2px 6px;color:inherit;cursor:pointer;">×</button>
+                                </div>
+                                <div style="font-size:13px;line-height:1.75;opacity:.9;">
+                                    <div><b>先看这里：这个功能是做什么的？</b><br>「Cloudflare 后台消息服务」是给需要“关闭网页或离开 UwU 后，仍然希望后台继续执行任务并收到系统通知”的用户使用的。它和上面的「持续运行增强」不是同一种东西：Cloudflare 后台消息服务依靠你自己部署的 Cloudflare Worker；持续运行增强依靠设备端的音频保活。两者可以分别开关，不会因为开启 Cloudflare 后台消息服务就强制播放音频。</div>
+
+                                    <div style="margin-top:14px;padding:12px 14px;border-radius:12px;background:rgba(229,57,53,.10);border:1px solid rgba(229,57,53,.45);color:#e53935;"><b>⚠️ 重要：开启 Cloudflare 后台后，不需要再开启「持续运行增强」（音频保活）。两者请择一使用，不要同时开启！</b><br>Cloudflare 后台就是为了不用音频保活而做的：开了它，就算 UwU 完全关闭也能收到消息，还能一边听音乐一边等回复。两个一起开只会白白耗电、占用音频通道，等于没有用到这个功能。</div>
+
+                                    <div style="margin-top:14px;padding:12px 14px;border-radius:12px;background:rgba(255,180,80,.14);border:1px solid rgba(255,180,80,.35);"><b>隐私与数据流向声明（部署前请先阅读）</b><br>本项目提供的是开源部署代码。按照本教程部署后，Worker、Queue 和 Durable Objects 都建立在<b>你自己的 Cloudflare 帐号</b>中；项目作者的 GitHub 不会因为你部署本项目就自动收到你的聊天内容、API Key、推送订阅或任务记录。当前项目代码没有把这些资料回传到作者的服务器。<br><br><b>启用 Cloudflare 后台模式时，资料会离开设备：</b>UwU 会把后台任务需要的 userId、聊天识别资料、AI 请求上下文和 AI API 配置（包含 API Key）发送到你自己的 Worker。Worker 会在自己的 Durable Objects 中保存任务和待同步回复等运行资料；Queue 消息本身只包含任务识别资料。Worker 还会把 AI 请求内容发送到你所设置的 AI 服务商，并在自己的 Cloudflare 帐号中保存推送订阅资料以发送通知。<br><br><b>只开启「持续运行增强」并关闭 Cloudflare 后台模式时：</b>聊天生成请求不会经过这套 Worker、Queue 或 Durable Objects；UwU 会直接把请求发送给你设置的 AI 服务商。<br><br>因此，这不是「资料完全不离开设备」的功能。请只部署到自己控制的 Cloudflare 帐号、使用自己信任的 AI 服务商，并妥善保管 BACKEND_TOKEN、AI API Key 和 VAPID_PRIVATE_KEY；不要使用陌生人的 Worker，也不要把同一个后台 Token 提供给不信任的其他使用者。</div>
+
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.08);"><b>最重要的原则</b><br>你不是把自己的 Cloudflare 帐号交给 UwU，也不是使用别人共用的后台。每个人都应该部署自己的 Worker。下面的教程会从“完全不会 Cloudflare”开始，一步一步告诉你点哪里。</div>
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(138,169,194,.15);"><b>📖 图文教程</b><br>不想看纯文字的话，可以直接看图文版教程：<a href="https://docs.qq.com/doc/DUmh4RU1uRkRQZ3lO" target="_blank" rel="noopener" style="color:var(--primary-color,#8aa9c2);word-break:break-all;">https://docs.qq.com/doc/DUmh4RU1uRkRQZ3lO</a></div>
+
+                                    <div style="margin-top:14px;"><b>① 准备一个 Cloudflare 帐号</b><br>如果你还没有 Cloudflare 帐号，先注册并登录自己的 Cloudflare。进入 Cloudflare 后，在左侧找到 <b>Workers & Pages</b>。<br><br>你只需要使用自己的 Cloudflare 帐号，不需要把 Cloudflare 密码、API Token 或其他登录信息发给任何人。</div>
+
+                                                                        <div style="margin-top:14px;"><b>② 先建立 Queue（这一步要在部署 Worker 之前）</b><br>在 Cloudflare 控制台进入左侧 <b>Compute → Queues</b>，点击 <b>Create Queue</b>，名称填写 <code>uwu-ai-jobs</code> 并创建。名称必须完全一致；Queue 不是网址，不用填进 UwU。<br><br><b>免费额度提醒：</b>Workers Free 的 Queue 每个 Cloudflare 帐号每天共用 <b>10,000 次操作</b>，同一帐号里的其他 Queue 也会占用这份额度。一个成功处理的小消息通常会产生写入、读取、删除共 3 次操作；重试还会增加读取操作。因此约 3,333 个任务／天只是“没有其他 Queue 使用、没有重试”时的理论估算，不能当作保证额度。</div>
+<div style="margin-top:14px;"><b>③ Fork 项目，再用 Cloudflare 连接你自己的 Fork 创建 Worker</b><br>推荐用 Fork 的方式部署：Fork 出来的是<b>你自己 GitHub 账号里的一份副本</b>，以后作者更新了，你可以自己决定什么时候同步，不会被强行更新。<br><br><b>第 1 步：Fork 项目</b><br>登录 GitHub，打开 <a href="https://github.com/YUEYUE0426/background-message-backend" target="_blank" rel="noopener" style="color:var(--primary-color,#8aa9c2);word-break:break-all;">https://github.com/YUEYUE0426/background-message-backend</a>，点击右上角的 <b>Fork</b>，再点 <b>Create fork</b>。完成后你的 GitHub 里会出现 <b>你的用户名/background-message-backend</b>。<br><br><b>第 2 步：在 Cloudflare 连接你的 Fork</b><br>进入 <b>Workers & Pages → Create application → Import a repository（或 Connect to Git）</b>，按提示登录并授权 GitHub，选择<b>你自己账号下的</b> <b>background-message-backend</b>（不是作者的）。<br><br>然后按以下方式填写：<br>• Project name：可以保持 <b>background-message-backend</b><br>• Build command：留空<br>• Deploy command：填写 <code>npm run deploy</code><br>• Preview command：填写 <code>npx wrangler preview</code><br>• Preview builds：不需要开启<br>• Cloudflare Access：不需要开启<br><br>部署成功后，在 Worker 的 Bindings 或 Queue 的 Consumers 页面确认 <code>AI_QUEUE</code> 已连到 <code>uwu-ai-jobs</code>。如果 Worker 之前已部署，先确认 Queue 绑定后再重新部署最新版本。</div>
+
+                                    <div style="margin-top:14px;"><b>④ 找到你自己的 Worker 地址</b><br>部署成功后，Cloudflare 会给你的 Worker 一个地址，通常类似：<br><code style="word-break:break-all;">https://background-message-backend.你的Cloudflare账号.workers.dev</code><br><br>这个地址就是之后要填进 UwU 的「Cloudflare Worker 地址」。<b>请复制你自己 Cloudflare 页面显示的真实地址，不要照抄教程里的示例。</b></div>
+
+                                    <div style="margin-top:14px;"><b>⑤ 打开 /setup，生成 VAPID 密钥</b><br>把刚才的 Worker 地址后面加上 <code>/setup</code> 打开，例如：<br><code style="word-break:break-all;">https://你的Worker地址/setup</code><br><br>打开后会看到「生成 VAPID 密钥」。点击一次即可生成 <b>VAPID_PUBLIC_KEY</b> 和 <b>VAPID_PRIVATE_KEY</b>。<br><br>如果你已经生成并准备使用这一组，就一直使用这一组。</div>
+
+                                    <div style="margin-top:14px;"><b>⑥ 回到 Cloudflare，打开 Variables and Secrets</b><br>进入：<br><b>Workers & Pages → background-message-backend → Settings → Variables and Secrets</b><br><br>然后依次添加下面 4 个项目。<br><br><b>第 1 个：VAPID_PUBLIC_KEY</b><br>Key 填：<code>VAPID_PUBLIC_KEY</code><br>Value 填：刚才 /setup 页面生成的公钥<br>Secret：<b>不要开启</b><br>Environment：选择 <b>Production</b><br><br><b>第 2 个：VAPID_PRIVATE_KEY</b><br>Key 填：<code>VAPID_PRIVATE_KEY</code><br>Value 填：刚才 /setup 页面生成的私钥<br>Secret：<b>必须开启</b><br>Environment：选择 <b>Production</b><br><br><b>第 3 个：VAPID_SUBJECT</b><br>Key 填：<code>VAPID_SUBJECT</code><br>Value 填写一个联系方式，格式是 <code>mailto:</code> 加邮箱，例如：<code>mailto:your-email@example.com</code>。<b>这个值只是推送时附带的联系方式，不会真的发邮件，也不影响能不能收到通知，所以填示例值也能正常使用；建议填你自己的邮箱。</b><br>Secret：<b>不要开启</b><br>Environment：选择 <b>Production</b><br><br><b>第 4 个：BACKEND_TOKEN（必填）</b><br>Key 填：<code>BACKEND_TOKEN</code><br>Value 使用密码管理器生成一段至少 32 字符的随机值，或用安全的随机密码生成器生成。不要使用示例值、邮箱、Worker 地址或容易猜到的密码。<br>Secret：<b>必须开启</b><br>Environment：选择 <b>Production</b><br><br><b>保存好这段 Token，下一步要原样填写到 UwU。不要贴到 GitHub、截图或聊天中。</b><br><br><b>关于 VAPID_SUBJECT：</b>它不参与密钥生成，只是推送时附带的「联系方式」（格式为 <code>mailto:邮箱</code> 或一个网址）。苹果、Google 等推送服务只会检查格式对不对，不会验证邮箱是否真实，所以直接填示例值也能正常收到通知。建议还是填你自己的邮箱，万一推送出问题，对方可以联系到你。注意要保留开头的 <code>mailto:</code>，不要只写邮箱。它是在生成密钥以后，单独在 Cloudflare 这里填写的。</div>
+
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(255,180,80,.12);"><b>⚠️ 私钥一定要保护好</b><br><code>VAPID_PRIVATE_KEY</code> 属于敏感信息。不要发到聊天群、GitHub、截图或公开网页里。Cloudflare 里请使用 <b>Secret</b> 保存它。AI API Key 也同样不要公开。</div>
+
+                                    <div style="margin-top:14px;"><b>⑦ 回到 UwU，填写 Worker 地址和必填 Token</b><br>进入 <b>设置 → API → Cloudflare 后台消息服务</b>，打开开关。<br><br>在「Cloudflare Worker 地址」中粘贴你自己的 Worker 地址，例如：<br><code style="word-break:break-all;">https://background-message-backend.你的账号.workers.dev</code><br><br>在「后台访问 Token」中，原样填写刚才保存在 Cloudflare Secret <code>BACKEND_TOKEN</code> 的同一段值。<b>地址和 Token 都是必填项；没有正确配置 Token，Worker 会拒绝请求。</b></div>
+
+                                    <div style="margin-top:14px;"><b>⑧ 先点「测试后台」</b><br>填写 Worker 地址和 Token 后，先不要急着测试通知，先点击 <b>「测试后台」</b>。如果显示连接成功，说明 UwU 已经能够访问你的 Worker。<br><br>如果这里失败，优先检查：<br>1. Worker 地址有没有复制错，地址后面有没有误加 <code>/setup</code>；<br>2. Cloudflare 的 <code>BACKEND_TOKEN</code> 是否在 <b>Production</b> 环境保存为 Secret；<br>3. UwU 中的 Token 是否与 Cloudflare Secret 完全相同；<br>4. 最新 Worker 是否已部署并处于 Active 状态。</div>
+
+                                    <div style="margin-top:14px;"><b>⑨ 注册后台通知</b><br>测试后台连接成功以后，再点击 <b>「注册后台通知」</b>。第一次使用时，系统可能会询问通知权限，请选择允许。<br><br><b>iPhone 用户特别注意：</b>iOS Web Push 需要把 UwU 添加到主屏幕，然后从主屏幕的 UwU 图标打开，而不是只在 Safari 标签页里使用。添加到主屏幕后，再进入 UwU 完成通知授权和「注册后台通知」。</div>
+
+                                    <div style="margin-top:14px;"><b>⑩ AI API 还是在 UwU 里管理，不需要搬到 Cloudflare</b><br>这一点非常重要。你的 AI API 地址、API Key、模型等设置，继续在 UwU 的 API 设置里管理。<br><br>以后如果你经常换 API，可以直接在 UwU 里使用「快速 API 设置」或普通 API 设置修改。后台服务会把当前配置同步到<b>你自己的 Worker</b>，不需要每换一次 API 就重新编辑 Cloudflare 项目。<br><br>也就是说：<b>Cloudflare 负责后台执行和通知；UwU 负责管理你正在使用的 AI API 配置。</b></div>
+
+                                    <div style="margin-top:14px;"><b>⑪ 第一次测试建议这样做</b><br>完成上面的设置后，确认 Queue 已建立、Worker 部署成功，并在 UwU 完成通知注册。先点 <b>「发送测试通知」</b>：如果 iPhone 收到系统通知，Push 通道正常。再发送一条普通聊天消息，等出现「后台已接收回复任务」提示后切到后台。AI 完成后应收到系统通知；回到 UwU 时会同步回复。<br><br>如果测试通知能收到、但 AI 回复通知收不到，检查 Cloudflare Worker Logs 中的 Queue 与推送错误。</div>
+
+                                    <div style="margin-top:14px;"><b>⑫ 「持续运行增强」和「Cloudflare 后台消息服务」到底有什么区别？</b><br><b>持续运行增强：</b>设备端音频保活方案，主要目的是尽量让网页在后台继续保持运行；它可能会带来额外的耗电。<br><br><b>Cloudflare 后台消息服务：</b>把后台任务交给你自己的 Cloudflare Worker，并通过 Web Push 把消息通知发送回设备；它不需要为了后台功能一直播放音频。<br><br>两者是<b>独立开关</b>，开启 Cloudflare 后台消息服务不会强制开启持续运行增强；但<b>请择一使用</b>，开了 Cloudflare 后台就不需要再开持续运行增强。</div>
+
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.08);"><b>如何更新 Worker（作者发布新版本后）</b><br>1. 打开你自己 GitHub 里 Fork 出来的 <b>background-message-backend</b> 仓库；<br>2. 如果页面提示 <b>This branch is out-of-date</b>，点击 <b>Sync fork → Update branch</b>；<br>3. Cloudflare 检测到仓库更新后会自动重新部署，等 1～2 分钟，在 Worker 的 Deployments 里看到新的部署记录即可；</div>
+
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(255,180,80,.12);"><b>⚠️ 使用注意事项</b><br>• <b>只要开启了 Cloudflare 后台，即使在 UwU 前台使用，AI 回复也会通过 Cloudflare 后台完成。</b><br>• 点击「停止」时，如果 AI 服务商已经开始生成，这次的 token 仍会计费，但回复会被丢弃，不会再出现。<br>• Cloudflare 免费额度有每日上限，超出后会报错但不会扣费，次日（UTC 0 点）恢复。<br>• 不要把 BACKEND_TOKEN、VAPID 私钥、AI API Key 发给任何人。</div>
+
+                                    <div style="margin-top:14px;"><b>⑬ 如果以后想重新部署怎么办？</b><br>不要重新生成一组 VAPID 密钥后随便覆盖旧值。只要你继续使用同一个 Worker 和原来的 VAPID 配置，就继续使用原来的密钥。只有在你明确需要更换整套推送身份时，才重新生成并同步替换相关配置。</div>
+
+                                    <div style="margin-top:14px;"><b>⑭ 常见问题</b><br><b>「/setup」打不开：</b>确认 Worker 已经成功部署，并且访问的是你自己的 Worker 地址加 <code>/setup</code>。<br><br><b>「测试后台」失败：</b>先检查 Worker 地址、部署状态和是否误把 <code>/setup</code> 填进了 UwU 的 Worker 地址栏。<br><br><b>能连接 Worker，但收不到通知：</b>先点「发送测试通知」。如果失败，查看 Worker Logs 的推送错误；若提示尚未注册，重新点「注册后台通知」。测试通知成功但 AI 回覆无通知时，确认 Queue 的消费者已连接，并查看 Worker Logs。最后确认 iPhone 允许通知、UwU 从主屏幕打开且专注模式没有过滤通知。<br><br><b>换了 AI API 后后台还在用旧配置：</b>先回到 UwU，确认新的 API 设置已经保存，再让后台服务同步一次。不要去修改 Cloudflare 里的 AI API Key，因为 AI API 配置本来就是由 UwU 管理的。<br><br><b>担心 AI Key 安全：</b>后台任务需要在 Worker 端调用 AI，因此当前 AI 配置会同步保存到你自己控制的 Worker。请只连接自己部署的 Worker，不要把 API Key 同步到陌生服务。</div>
+
+                                    <div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.08);"><b>最后给新手宝宝的最短流程：</b><br>① 登录自己的 Cloudflare 帐号 → ② 先创建 <code>uwu-ai-jobs</code> Queue → ③ Fork 项目并用 Cloudflare 连接你自己的 Fork、确认 Queue 绑定 → ④ 打开 Worker <code>/setup</code> 生成 VAPID 密钥 → ⑤ Cloudflare 添加 Variables/Secrets → ⑥ 回 UwU 填 Worker 地址和必填 Token，并测试连接 → ⑦ 注册后台通知、发送测试通知 → ⑧ iPhone 从主屏幕打开 UwU → ⑨ 正常聊天并切到后台等待回复。记得同一 Cloudflare 帐号其他 Queue 也会共用每日 Queue 额度。</div>
                                 </div>
                             </div>
                         </div>
@@ -582,6 +755,27 @@
                     </div>
                 </div>
                 
+                <div id="quick-api-settings-modal" class="modal-overlay quick-api-modal" style="display:none;position:fixed;inset:0;width:100vw;max-width:100vw;background:rgba(0,0,0,0.38);z-index:100001;align-items:center;justify-content:center;padding:18px;box-sizing:border-box;">
+                    <div class="modal-window quick-api-modal-window">
+                        <h3>快速 API 设置</h3>
+                        <div class="quick-api-preset-row">
+                            <select id="quick-api-preset-select">
+                                <option value="">— 选择已保存的 API 预设 —</option>
+                            </select>
+                        </div>
+                        <div class="quick-api-fields">
+                            <div class="quick-api-field-row"><label>服务商</label><select id="quick-api-provider"><option value="newapi">NewAPI (自定义)</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="gemini">Gemini</option></select></div>
+                            <div class="quick-api-field-row"><label>API 地址</label><input id="quick-api-url" type="text" autocomplete="off"></div>
+                            <div class="quick-api-field-row"><label>API 密钥</label><input id="quick-api-key" type="password" autocomplete="new-password"></div>
+                            <div class="quick-api-field-row quick-api-model-row"><label>模型</label><select id="quick-api-model"><option value="">请先拉取模型</option></select><button type="button" id="quick-api-fetch-models" class="btn btn-secondary">拉取</button></div>
+                        </div>
+                        <div class="quick-api-actions">
+                            <button type="button" id="quick-api-close" class="btn btn-neutral">取消</button>
+                            <button type="button" id="quick-api-apply" class="btn btn-primary">应用并保存</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="api-presets-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:9999;align-items:center;justify-content:center;">
                     <div class="modal-window" style="width:640px;max-width:94%;background:var(--panel-bg,#fff);padding:20px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.12);">
                         <h3 style="margin:0 0 16px 0; font-size: 18px;">API 预设管理</h3>
@@ -595,7 +789,22 @@
         </main>
     </div>
     <div id="wallpaper-screen" class="screen">
-        <header class="app-header"><button class="back-btn" data-target="home-screen">‹</button><div class="title-container"><h1 class="title">更换壁纸</h1></div><div class="placeholder"></div></header><main class="content"><div class="wallpaper-preview" id="wallpaper-preview"><span>当前壁纸预览</span></div><input type="file" id="wallpaper-upload" accept="image/*" style="display: none;"><label for="wallpaper-upload" class="btn btn-primary">从相册选择新壁纸</label></main>
+        <header class="app-header"><button class="back-btn" data-target="home-screen">‹</button><div class="title-container"><h1 class="title">更换壁纸</h1></div><div class="placeholder"></div></header><main class="content"><div class="wallpaper-preview" id="wallpaper-preview"><span>当前壁纸预览</span></div><input type="file" id="wallpaper-upload" accept="image/*" style="display: none;"><div style="display:flex;gap:10px;">
+                <label for="wallpaper-upload" class="btn btn-primary" style="flex:1;width:auto;margin:0;padding:12px 4px;font-size:14px;">从相册选择</label>
+                <button type="button" id="wallpaper-url-open-btn" class="btn btn-neutral" style="font-family:inherit;flex:1;width:auto;margin:0;padding:12px 4px;font-size:14px;">图片链接</button>
+                <button type="button" id="wallpaper-reset-btn" class="btn btn-neutral" style="font-family:inherit;flex:1;width:auto;margin:0;padding:12px 4px;font-size:14px;">恢复默认</button>
+            </div>
+        </main>
+    </div>
+    <div id="wallpaper-url-modal" class="modal-overlay">
+        <div class="modal-window" style="max-width:340px;">
+            <h3 style="margin:0 0 12px;">使用图片链接作为壁纸</h3>
+            <input type="text" id="wallpaper-url-input" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://…" style="font-family:inherit;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e5e5;border-radius:10px;font-size:16px;background:#fff;color:#333;-webkit-user-select:text;user-select:text;">
+            <div style="display:flex;gap:10px;margin-top:14px;">
+                <button type="button" id="wallpaper-url-cancel-btn" class="btn btn-neutral" style="font-family:inherit;flex:1;width:auto;margin:0;padding:10px;">取消</button>
+                <button type="button" id="wallpaper-url-apply-btn" class="btn btn-primary" style="font-family:inherit;flex:1;width:auto;margin:0;padding:10px;">应用</button>
+            </div>
+        </div>
     </div>
     <div id="widget-market-screen" class="screen">
         <header class="app-header">
@@ -1258,6 +1467,9 @@
                 <div class="form-group">
                     <label for="sticker-urls-textarea">数据格式：名称:URL (英文冒号，每行一个)</label>
                     <textarea id="sticker-urls-textarea" rows="8" placeholder="例如：&#10;开心:https://example.com/happy.gif&#10;哭泣:https://example.com/cry.png"></textarea>
+                    <input type="file" id="sticker-batch-file" accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none;">
+                    <label for="sticker-batch-file" class="btn btn-secondary" style="width:100%; margin-top:10px;">从 TXT / Word 导入</label>
+                    <p id="sticker-batch-file-hint" style="margin:8px 0 0; color:#999; font-size:12px; text-align:center;">导入后会自动以文档名作为分组名称，并整理为“名称:URL”格式</p>
                 </div>
                 <button type="submit" class="btn btn-primary">开始导入</button>
             </form>
@@ -1540,7 +1752,7 @@
             <div class="title-container">
                 <h1 class="title">回忆日记</h1>
             </div>
-            <div class="action-btn-group">
+            <div class="action-btn-group" style="position: relative;">
                 <button class="action-btn" id="journal-manage-btn" title="管理日记">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
                         <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/>
@@ -1561,6 +1773,10 @@
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
+                <div id="journal-add-menu" class="world-book-new-menu" style="display: none;">
+                    <div class="menu-item" id="journal-menu-manual">手动总结</div>
+                    <div class="menu-item" id="journal-menu-auto">自动总结</div>
+                </div>
             </div>
         </header>
         <main class="content">
@@ -1575,10 +1791,19 @@
         
         <!-- 日记多选操作栏 -->
         <div id="journal-multi-select-bar" style="display: none;">
-            <span id="journal-select-count">已选 0 篇</span>
-            <div style="display: flex; gap: 10px;">
-                <button class="btn btn-danger btn-small" id="journal-batch-delete-btn">删除</button>
-                <button class="btn btn-primary btn-small" id="journal-merge-btn">合并精简</button>
+            <div class="journal-bar-row">
+                <span id="journal-select-count">已选 0 篇</span>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="journal-select-all-btn">全选</button>
+                    <button class="btn btn-danger btn-small" id="journal-batch-delete-btn">删除</button>
+                    <button class="btn btn-primary btn-small" id="journal-merge-btn">合并精简</button>
+                </div>
+            </div>
+            <div class="journal-bar-row journal-bar-io">
+                <button class="btn btn-secondary btn-small" id="journal-export-txt-btn">导出TXT</button>
+                <button class="btn btn-secondary btn-small" id="journal-export-uwu-btn">导出UWU</button>
+                <button class="btn btn-secondary btn-small" id="journal-import-btn">导入</button>
+                <input type="file" id="journal-import-input" accept=".json,application/json" style="display:none;">
             </div>
         </div>
     </div>
@@ -1802,15 +2027,20 @@
     <div id="moments-screen" class="screen">
         <header class="moments-header" id="moments-header">
             <button class="back-btn" data-target="chat-room-screen">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="m9.55 12l7.35 7.35q.375.375.363.875t-.388.875t-.875.375t-.875-.375l-7.7-7.675q-.3-.3-.45-.675t-.15-.75t.15-.75t.45-.675l7.7-7.7q.375-.375.888-.363t.887.388t.375.875t-.375.875z"/></svg>
             </button>
             <div class="title-container">
                 <h1 class="title" id="moments-title" style="opacity: 0; transition: opacity 0.3s;">动态</h1>
             </div>
-            <div class="action-btn-group">
-                <button class="action-btn" id="moments-refresh-btn">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            <div class="action-btn-group" style="position: relative;">
+                <button class="action-btn" id="moments-refresh-btn" title="发布动态 / 刷新">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" fill-rule="evenodd" d="M14.024 6c.574 0 1.073.39 1.212.947l.028.106A1.25 1.25 0 0 0 16.476 8H17.5A1.5 1.5 0 0 1 19 9.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 16.5v-7A1.5 1.5 0 0 1 6.5 8h1.024a1.25 1.25 0 0 0 1.212-.947l.028-.106A1.25 1.25 0 0 1 9.976 6zM12 10a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5" clip-rule="evenodd"/></svg>
                 </button>
+                <div id="moments-action-menu" class="world-book-new-menu" style="display: none;">
+                    <div class="menu-item" id="moments-menu-post">发布动态</div>
+                    <div class="menu-item" id="moments-menu-only-char">只看他</div>
+                    <div class="menu-item" id="moments-menu-refresh">刷新</div>
+                </div>
             </div>
         </header>
         <main class="content moments-content" id="moments-content-area" style="padding: 0;">
@@ -1832,6 +2062,29 @@
         <div class="moments-comment-input-area" id="moments-comment-input-area" style="display: none;">
             <input type="text" id="moments-comment-input" placeholder="评论..." enterkeyhint="send">
             <button id="moments-comment-send-btn" class="btn btn-primary btn-small">发送</button>
+        </div>
+    </div>
+
+    <!-- 发布动态弹窗（用户自己发朋友圈） -->
+    <div id="moment-compose-modal" class="modal-overlay">
+        <div class="modal-window">
+            <h3>发布动态</h3>
+            <div class="form-group">
+                <textarea id="moment-compose-text" rows="5" maxlength="500" placeholder="这一刻的想法..." style="width:100%;box-sizing:border-box;resize:none;"></textarea>
+            </div>
+            <div class="form-group" id="moment-compose-image-box">
+                <button type="button" class="btn btn-secondary btn-small" id="moment-compose-add-img" style="margin:0;">添加图片</button>
+                <div id="moment-compose-img-fields" style="display:none;">
+                    <textarea id="moment-compose-img-desc" rows="2" maxlength="200" placeholder="图片画面描述（必填，Ta 看不到图片，只能看到这段文字）" style="width:100%;box-sizing:border-box;resize:none;"></textarea>
+                    <input type="text" id="moment-compose-img-url" placeholder="图片链接（选填，填了就直接显示图片）" style="width:100%;box-sizing:border-box;margin-top:8px;">
+                    <div style="text-align:right;margin-top:6px;"><span id="moment-compose-remove-img" style="font-size:12px;color:#999;cursor:pointer;">不要图片了</span></div>
+                </div>
+            </div>
+            <div style="font-size:12px;color:#999;margin:-4px 0 4px;">发布后，Ta 会在下次聊天时看到这条动态。</div>
+            <div style="display:flex;gap:10px;margin-top:16px;">
+                <button id="moment-compose-confirm" class="btn btn-primary" style="flex:1;">发布</button>
+                <button id="moment-compose-cancel" class="btn btn-neutral" style="flex:1;">取消</button>
+            </div>
         </div>
     </div>
 
@@ -2257,6 +2510,35 @@
     </div>
 </div>
 
+<div id="journal-auto-modal" class="modal-overlay">
+    <div class="modal-window">
+        <h3>自动总结设置</h3>
+        <form id="journal-auto-form">
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between;">
+                <label for="journal-auto-enabled" style="font-size: 14px; color: #555;">开启自动总结</label>
+                <label class="kkt-switch">
+                    <input type="checkbox" id="journal-auto-enabled">
+                    <span class="kkt-slider"></span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="journal-auto-interval">每多少条消息自动总结一次</label>
+                <input type="number" id="journal-auto-interval" min="5" step="1" placeholder="例如：20">
+            </div>
+            <div id="journal-auto-info" style="font-size: 12px; color: #888; margin-bottom: 12px; line-height: 1.6;"></div>
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between;">
+                <label for="journal-auto-favorited" style="font-size: 14px; color: #555;">参考已收藏的日记</label>
+                <label class="kkt-switch">
+                    <input type="checkbox" id="journal-auto-favorited">
+                    <span class="kkt-slider"></span>
+                </label>
+            </div>
+            <div id="journal-auto-api-tip" style="font-size: 12px; color: #888; margin: 4px 0 14px; line-height: 1.6;"></div>
+            <button type="submit" class="btn btn-primary">保存</button>
+        </form>
+    </div>
+</div>
+
 <!-- Journal Style Selection Modal -->
 <div id="journal-style-selection-modal" class="modal-overlay">
     <div class="modal-window" style="max-height: 80vh; display: flex; flex-direction: column;">
@@ -2357,7 +2639,7 @@
     </div>
 </div>
 
-<div id="bubble-presets-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);justify-content:center;align-items:center;z-index:9999;"><div class="modal-window" style="max-width:520px;background:var(--panel-bg,#fff);padding:14px;border-radius:10px;box-shadow:0 12px 36px rgba(10,10,20,0.12);"><h3 style="margin:0 0 10px 0;font-size:16px;">管理气泡预设</h3><div id="bubble-presets-list" style="max-height:340px; overflow:auto; margin-bottom:12px;"></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button type="button" id="close-presets-modal" class="btn btn-primary" style="padding:8px 12px;border-radius:8px;">关闭</button></div></div></div>
+<div id="bubble-presets-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);justify-content:center;align-items:center;z-index:9999;"><div class="modal-window" style="max-width:520px;background:var(--panel-bg,#fff);padding:14px;border-radius:10px;box-shadow:0 12px 36px rgba(10,10,20,0.12);"><h3 style="margin:0 0 10px 0;font-size:16px;">管理气泡预设</h3><div style="margin-bottom:6px;"><input type="search" id="bubble-presets-search" placeholder="搜索美化名称..." autocomplete="off" style="box-sizing:border-box;width:100%;padding:9px 11px;border:1px solid #ddd;border-radius:8px;background:var(--panel-bg,#fff);color:inherit;outline:none;"></div><div id="bubble-presets-search-stats" style="font-size:12px;color:#999;margin:0 2px 10px;">共 0 个美化 · 搜索到 0 个</div><div id="bubble-presets-list" style="max-height:340px; overflow:auto; margin-bottom:12px;"></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button type="button" id="close-presets-modal" class="btn btn-primary" style="padding:8px 12px;border-radius:8px;">关闭</button></div></div></div>
 
 <input type="file" id="bubble-preset-import-input" accept=".json,.txt,.doc,.docx" style="display: none;">
 
@@ -2750,6 +3032,8 @@
 <script src="js/modules/shop_html.js"></script> <!-- 商城HTML注入 -->
 <script src="js/modules/settings_chat.js"></script> <!-- 聊天设置与管理 -->
 <script src="js/modules/keep_alive.js"></script> <!-- 跨平台持续运行增强 -->
+<script src="js/modules/system_notifications.js"></script> <!-- 系统级通知 -->
+<script src="js/modules/backend_adapter.js"></script> <!-- Cloudflare/Web Push 后台适配层 -->
 <script src="js/modules/settings_api.js"></script> <!-- API 设置与预设 -->
 <script src="js/modules/settings_presets.js"></script> <!-- 预设管理 (气泡、人设等) -->
 <script src="js/modules/settings_customize.js"></script> <!-- 个性化与外观设置 -->
